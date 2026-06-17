@@ -109,6 +109,8 @@ def _show_quota() -> int:
     tracker = QuotaTracker()
     snap = tracker.snapshot()
     print(snap.to_line())
+    print()
+    print(snap.to_block())
     return 0
 
 

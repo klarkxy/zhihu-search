@@ -35,8 +35,9 @@ from .base import (
     TokenInvalid,
     UpstreamTimeout,
     UpstreamUnavailable,
+    parse_retry_after,
 )
-from ..quota import QuotaSnapshot, QuotaTracker
+from ..quota import QuotaKind, QuotaSnapshot, QuotaTracker
 
 
 BASE_URL = "https://developer.zhihu.com"
@@ -112,6 +113,7 @@ class ZhihuRestClient:
         path: str,
         params: dict[str, Any],
         *,
+        kind: QuotaKind = "search",
         timeout: float | None = None,
     ) -> ApiResult:
         try:
@@ -123,13 +125,14 @@ class ZhihuRestClient:
             raise UpstreamTimeout(f"{path} 请求超时") from exc
         except httpx.HTTPError as exc:
             raise UpstreamUnavailable(f"{path} 网络错误：{exc}") from exc
-        return self._parse_envelope(resp, path)
+        return self._parse_envelope(resp, path, kind=kind)
 
     async def _envelope_post(
         self,
         path: str,
         body: dict[str, Any],
         *,
+        kind: QuotaKind = "search",
         timeout: float | None = None,
     ) -> ApiResult:
         try:
@@ -141,15 +144,21 @@ class ZhihuRestClient:
             raise UpstreamTimeout(f"{path} 请求超时") from exc
         except httpx.HTTPError as exc:
             raise UpstreamUnavailable(f"{path} 网络错误：{exc}") from exc
-        return self._parse_envelope(resp, path)
+        return self._parse_envelope(resp, path, kind=kind)
 
-    def _parse_envelope(self, resp: httpx.Response, path: str) -> ApiResult:
+    def _parse_envelope(
+        self,
+        resp: httpx.Response,
+        path: str,
+        *,
+        kind: QuotaKind = "search",
+    ) -> ApiResult:
         """解析 ``{Code, Message, Data}`` 信封。直答走 OpenAI 格式，单独处理。"""
         # HTTP 层错误
         if resp.status_code in (401, 403):
             raise TokenInvalid()
         if resp.status_code == 429:
-            retry = self._retry_after(resp)
+            retry = parse_retry_after(resp.headers.get("Retry-After"))
             raise RateLimited(
                 f"{path} 被限流（HTTP 429），retry-after={retry}s",
                 retry_after=retry,
@@ -185,22 +194,12 @@ class ZhihuRestClient:
                 raise InvalidArguments(f"{path} 参数错误：{msg}")
             raise UpstreamUnavailable(f"{path} 返回错误 {code}：{msg}")
 
-        quota = self._quota.increment()
+        quota = self._quota.increment(kind)
         return ApiResult(
             data=body.get("Data", {}),
             quota=quota,
             headers={k: v for k, v in resp.headers.items()},
         )
-
-    @staticmethod
-    def _retry_after(resp: httpx.Response) -> float | None:
-        ra = resp.headers.get("Retry-After")
-        if not ra:
-            return None
-        try:
-            return float(ra)
-        except ValueError:
-            return None
 
     # ------------------------------------------------------------------
     # 4 个业务接口
@@ -215,6 +214,7 @@ class ZhihuRestClient:
         return await self._envelope_get(
             "/api/v1/content/zhihu_search",
             {"Query": query, "Count": count},
+            kind="search",
         )
 
     async def global_search(
@@ -231,14 +231,14 @@ class ZhihuRestClient:
         if filter:
             params["Filter"] = filter
         return await self._envelope_get(
-            "/api/v1/content/global_search", params
+            "/api/v1/content/global_search", params, kind="search"
         )
 
     async def hot_list(self, limit: int = 30) -> ApiResult:
         """知乎热榜。limit 自动截断到 1-30。"""
         limit = max(1, min(HOT_LIST_MAX, limit))
         return await self._envelope_get(
-            "/api/v1/content/hot_list", {"Limit": limit}
+            "/api/v1/content/hot_list", {"Limit": limit}, kind="trending"
         )
 
     async def zhida(
@@ -284,9 +284,10 @@ class ZhihuRestClient:
         if resp.status_code in (401, 403):
             raise TokenInvalid()
         if resp.status_code == 429:
+            retry = parse_retry_after(resp.headers.get("Retry-After"))
             raise RateLimited(
-                f"直答限流，retry-after={self._retry_after(resp)}s",
-                retry_after=self._retry_after(resp),
+                f"直答限流，retry-after={retry}s",
+                retry_after=retry,
             )
         if resp.status_code >= 400:
             raise UpstreamUnavailable(
@@ -316,7 +317,7 @@ class ZhihuRestClient:
             "finish_reason": choices[0].get("finish_reason"),
         }
 
-        quota = self._quota.increment()
+        quota = self._quota.increment("ask")
         return ApiResult(
             data=normalized,
             quota=quota,

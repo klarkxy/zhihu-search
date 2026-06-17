@@ -19,7 +19,6 @@ from fastmcp import FastMCP
 from . import credentials
 from .quota import QuotaSnapshot, QuotaTracker
 from .upstream.base import (
-    InvalidArguments,
     McpError,
     RateLimited,
     TokenInvalid,
@@ -76,8 +75,6 @@ def _err(message: str, quota: QuotaSnapshot | None = None) -> dict:
 def _translate(e: Exception, tracker: QuotaTracker | None = None) -> dict:
     quota = tracker.snapshot() if tracker is not None else None
     if isinstance(e, McpError):
-        return _err(str(e), quota)
-    if isinstance(e, InvalidArguments):
         return _err(str(e), quota)
     return _err(f"未预期错误：{e}", quota)
 
@@ -246,8 +243,7 @@ def _format_hot_items(data: dict) -> str:
     if not items:
         return "热榜为空。"
     lines: list[str] = ["## 知乎热榜\n"]
-    for item in items:
-        rank = items.index(item) + 1
+    for rank, item in enumerate(items, 1):
         title = item.get("Title") or "(无标题)"
         url = item.get("Url") or ""
         thumb = item.get("ThumbnailUrl") or ""
@@ -288,26 +284,14 @@ def _truncate(text: str, limit: int) -> str:
 
 def main() -> None:
     """以 stdio 模式启动 MCP 服务器。"""
-    import signal
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    def _shutdown() -> None:
-        loop.create_task(aclose_all())
-        loop.stop()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, _shutdown)
-        except NotImplementedError:  # pragma: no cover - Windows
-            pass
-
     try:
         mcp.run(transport="stdio")
     finally:
-        loop.run_until_complete(aclose_all())
-        loop.close()
+        # mcp.run() 内部由 anyio 管理事件循环；进程退出前关闭全局客户端。
+        try:
+            asyncio.run(aclose_all())
+        except Exception:  # pragma: no cover - 清理失败不应影响退出码
+            pass
 
 
 if __name__ == "__main__":
