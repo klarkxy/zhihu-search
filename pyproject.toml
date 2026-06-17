@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "zhihu-search"
+version = "0.1.0"
+description = "知乎开放平台的统一 MCP 封装"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "SATA-2.0" }
+authors = [
+    { name = "Klarkxy", email = "278370456@qq.com" }
+]
+dependencies = [
+    "fastmcp>=0.4.0",
+    "httpx>=0.27.0",
+    "httpx-sse>=0.4.0",
+    "pydantic>=2.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21.0",
+]
+
+[project.scripts]
+zhihu-search = "zhihu_search.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/klarkxy/zhihu-search"
+Repository = "https://github.com/klarkxy/zhihu-search"
+Issues = "https://github.com/klarkxy/zhihu-search/issues"
+Documentation = "https://github.com/klarkxy/zhihu-search/blob/main/AGENT_SETUP.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/zhihu_search"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
