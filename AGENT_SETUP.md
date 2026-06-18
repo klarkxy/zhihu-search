@@ -14,7 +14,7 @@
 ## 占位符约定
 
 - `<包来源>`：决定 `uvx` 从哪儿拉包。常见取值：
-  - PyPI（推荐，已上线）：`zhihu-search` 或 `zhihu-search==1.0.0`
+  - PyPI（推荐，已上线）：`zhihu-search`
   - GitHub 源码（开发版）：`git+https://github.com/klarkxy/zhihu-search`
   - 锁版本：`git+https://github.com/klarkxy/zhihu-search@v1.0.0`
 - `<包来源>` 写入 MCP 配置文件前必须替换成具体值；不要把字面量 `<包来源>` 落进 JSON。
