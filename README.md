@@ -10,7 +10,7 @@
 
 复制这段 prompt 给你的 AI 编程助手（Claude Code、Cursor、Codex、OpenCode 等），它会自动完成：
 
-> 请帮我安装并配置 zhihu-search 这个 MCP 服务器。先读取 https://raw.githubusercontent.com/klarkxy/zhihu-search/main/AGENT_SETUP.md，按步骤执行。Access Secret 不要发到聊天里，让我在本地终端执行保存命令。
+> 请帮我安装并配置 zhihu-search 这个 MCP 服务器。先读取 https://raw.githubusercontent.com/klarkxy/zhihu-search/main/AGENT_SETUP.md ，按步骤执行。Access Secret 不要发到聊天里，让我在本地终端执行保存命令。
 
 ### 手动安装
 
