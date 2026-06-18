@@ -14,9 +14,9 @@
 ## 占位符约定
 
 - `<包来源>`：决定 `uvx` 从哪儿拉包。常见取值：
-  - GitHub 源码（默认）：`git+https://github.com/klarkxy/zhihu-search`
-  - 锁版本：`git+https://github.com/klarkxy/zhihu-search@v0.1.0`
-  - PyPI 上线后：`zhihu-search`（不带 `--from`），或 `zhihu-search==0.1.0`
+  - PyPI（推荐，已上线）：`zhihu-search` 或 `zhihu-search==1.0.0`
+  - GitHub 源码（开发版）：`git+https://github.com/klarkxy/zhihu-search`
+  - 锁版本：`git+https://github.com/klarkxy/zhihu-search@v1.0.0`
 - `<包来源>` 写入 MCP 配置文件前必须替换成具体值；不要把字面量 `<包来源>` 落进 JSON。
 
 ## 安全原则
@@ -83,7 +83,7 @@ uvx --version
 执行：
 
 ```bash
-uvx --from <包来源> zhihu-search --check-token
+uvx zhihu-search --check-token
 ```
 
 第一次跑会下载包到 `~/.cache/uv`（Windows 在 `%LOCALAPPDATA%\uv`），耗时几秒到几十秒；之后命中缓存立即返回。
@@ -104,7 +104,7 @@ uvx --from <包来源> zhihu-search --check-token
 给用户显示命令模板，让用户自己替换尖括号内容并执行：
 
 ```bash
-uvx --from <包来源> zhihu-search --save-token "<粘贴你的 Access Secret>"
+uvx zhihu-search --save-token "<粘贴你的 Access Secret>"
 ```
 
 如果用户对命令历史敏感（PowerShell / bash history 会留痕），可以让用户走临时变量：
@@ -112,14 +112,14 @@ uvx --from <包来源> zhihu-search --save-token "<粘贴你的 Access Secret>"
 **bash / zsh（输入不回显）**：
 
 ```bash
-read -s -p "Access Secret: " S && uvx --from <包来源> zhihu-search --save-token "$S" && unset S
+read -s -p "Access Secret: " S && uvx zhihu-search --save-token "$S" && unset S
 ```
 
 **PowerShell（用完后清变量）**：
 
 ```powershell
 $env:ZHIHU_ACCESS_SECRET = "<粘贴你的 Access Secret>"
-uvx --from <包来源> zhihu-search --save-token $env:ZHIHU_ACCESS_SECRET
+uvx zhihu-search --save-token $env:ZHIHU_ACCESS_SECRET
 Remove-Item Env:\ZHIHU_ACCESS_SECRET
 ```
 
@@ -130,7 +130,7 @@ Remove-Item Env:\ZHIHU_ACCESS_SECRET
 保存后用 `--check-token` 复核：
 
 ```bash
-uvx --from <包来源> zhihu-search --check-token
+uvx zhihu-search --check-token
 ```
 
 **判定**：
@@ -148,7 +148,7 @@ uvx --from <包来源> zhihu-search --check-token
 执行：
 
 ```bash
-uvx --from <包来源> zhihu-search --probe
+uvx zhihu-search --probe
 ```
 
 期望输出示例：
@@ -172,7 +172,7 @@ uvx --from <包来源> zhihu-search --probe
 顺手查一下当日配额：
 
 ```bash
-uvx --from <包来源> zhihu-search --quota
+uvx zhihu-search --quota
 ```
 
 **判定**：
@@ -184,61 +184,34 @@ uvx --from <包来源> zhihu-search --quota
 
 ## 第 5 步：决定 MCP 配置文件写在哪
 
-**判定**：问用户「装到当前项目还是全局？」，默认项目级。展示即将写入的绝对路径，等用户确认。
+**判定**：问用户「装到哪个客户端？」，根据用户回答读取对应的安装指南：
 
-参考位置：
+| 客户端 | 指南文件 | 配置文件路径 |
+|---|---|---|
+| Claude Code | [setup/claude-code.md](setup/claude-code.md) | `~/.claude.json` 或 `.mcp.json` |
+| Codex | [setup/codex.md](setup/codex.md) | `~/.codex/config.toml` |
+| HanaAgent | [setup/hanako-agent.md](setup/hanako-agent.md) | `~/.hanako-dev/plugin-data/mcp/config.json` |
+| OpenCode | [setup/opencode.md](setup/opencode.md) | `~/.config/opencode/opencode.json` |
+| Cursor / 其他 | 参考 setup/README.md 中的通用配置 | 按客户端文档 |
 
-| 客户端       | 作用域       | 文件路径                              |
-|--------------|--------------|---------------------------------------|
-| Claude Code  | 项目         | `<当前目录>/.mcp.json`                |
-| Claude Code  | 用户全局     | `~/.claude.json`                      |
-| Cursor       | 项目         | `<当前目录>/.cursor/mcp.json`         |
-| Cursor       | 用户全局     | `~/.cursor/mcp.json`                  |
-| 其他         | 看客户端文档 | —                                     |
+读取对应指南，获取该客户端的：
+- 配置文件精确位置
+- 配置格式（JSON / TOML / JSON 数组）
+- 字段名差异（`mcpServers` vs `[mcp_servers]` vs `connectors`）
 
-未确定路径前不要继续。不要猜用户的客户端类型；如果用户没说，先问。
+未确定客户端前不要继续。不要猜用户的客户端类型；如果用户没说，先问。
 
 ---
 
 ## 第 6 步：写入 MCP 配置
 
-读第 5 步确认的目标文件，不存在则创建。必须保留已有服务器条目，只新增或更新 `zhihu` 这一项。`<包来源>` 占位符必须在写入前替换成具体值。
+读第 5 步确认的目标文件，不存在则创建。按该客户端的 setup/*.md 指南格式写入，必须保留已有服务器条目，只新增或更新 `zhihu` 这一项。
 
-**uvx 模式（推荐）**：
+**判定**：写入前用对应格式解析校验一遍（JSON 用 JSON 解析器，TOML 用 TOML 解析器）。写入后再读一遍，确认：
 
-```json
-{
-  "mcpServers": {
-    "zhihu": {
-      "command": "uvx",
-      "args": ["--from", "<包来源>", "zhihu-search"],
-      "env": {}
-    }
-  }
-}
-```
-
-用 pip 装的写法见文末「pip 备选方案」。
-
-默认使用凭证文件，不在 MCP 配置里写 token。如果用户明确要求用环境变量塞 token，才使用下面形式：
-
-```json
-{
-  "mcpServers": {
-    "zhihu": {
-      "command": "uvx",
-      "args": ["--from", "<包来源>", "zhihu-search"],
-      "env": { "ZHIHU_ACCESS_SECRET": "<用户贴的值>" }
-    }
-  }
-}
-```
-
-**判定**：写入前用 JSON 解析和序列化确认目标文件合法。写入后再读一遍，确认：
-
-- JSON 语法合法
+- 语法合法
 - 已有 MCP server 没丢
-- `zhihu` 的 `command` 是 `uvx` 且可运行（`uvx --version` 不报错）
+- `zhihu` 的 `command` 指向正确且可运行
 - `<包来源>` 已经替换成具体值，不是字面量
 - 未在配置文件中意外写入 Access Secret（除非用户明确要求 env 模式）
 
@@ -278,7 +251,7 @@ uvx --from <包来源> zhihu-search --quota
 | `直答请求超时（>120s）`                                                     | 用户用了 model='agent'（很慢）        | 改 fast 模型重试 |
 | `query 长度需在 2-100 字符之间`                                             | 调用方 query 太短 / 太长              | 调整后重试     |
 | `count 超出范围`                                                            | 调用方传了超过接口上限的 count        | 调整后重试     |
-| 客户端报 `tool not found`                                                   | 客户端没重启或配置文件位置不对        | 第 5 / 7 步    |
+| 客户端报 `tool not found`                                                   | 客户端没重启或配置文件位置/格式不对 | 第 5 / 7 步 + 对应 setup/*.md    |
 | `ImportError: No module named 'zhihu_search'`                               | Python 环境和 MCP 配置里的解释器不一致 | 第 1 / 6 步    |
 | 返回内容里 `剩余: 0`                                                       | 今日配额耗尽                          | 等到次日 / 提高上限 |
 
@@ -295,8 +268,8 @@ uvx --from <包来源> zhihu-search --quota
 | `ask`      | 直答                | 100      | `ZHIHU_DAILY_LIMIT_ASK`      |
 
 - 旧 `ZHIHU_DAILY_LIMIT` 仍可用：把三个桶同时设为同一个值（向后兼容）
-- 看用量：`uvx --from <包来源> zhihu-search --quota`
-- 清零今日：`uvx --from <包来源> zhihu-search --reset-quota`（仅在调试时使用）
+- 看用量：`uvx zhihu-search --quota`
+- 清零今日：`uvx zhihu-search --reset-quota`（仅在调试时使用）
 
 ---
 
@@ -312,7 +285,7 @@ python -m pip install -e .
 py -3 -m pip install -e .
 ```
 
-装好后，文档里所有 `uvx --from <包来源> zhihu-search ...` 都替换为：
+装好后，文档里所有 `uvx zhihu-search ...` 都替换为：
 
 - `zhihu-search ...`：用 `[project.scripts]` 装的脚本
 - 或 `python -m zhihu_search ...`：不依赖脚本目录在 PATH
@@ -361,7 +334,7 @@ pip 模式的 MCP 配置：
 
 ```bash
 # 1. 清凭证
-uvx --from <包来源> zhihu-search --clear-token
+uvx zhihu-search --clear-token
 # 或 pip 模式：zhihu-search --clear-token
 
 # 2. 删 MCP 配置里的 zhihu 条目
