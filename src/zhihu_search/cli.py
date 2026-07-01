@@ -200,10 +200,10 @@ def _print_json(result: commands.CommandResult, kind: str) -> int:
     payload: dict = {"success": result.success, "kind": kind}
     if result.success:
         payload["data"] = result.data or {}
-        if result.quota is not None:
-            payload["quota"] = _quota_to_dict(result.quota)
     else:
         payload["error"] = result.error
+    if result.quota is not None:
+        payload["quota"] = _quota_to_dict(result.quota)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0 if result.success else 1
 
@@ -212,6 +212,8 @@ def _print_markdown(result: commands.CommandResult, kind: str, **fmt_kw: object)
     """Markdown 输出：格式化文本 + 配额行。"""
     if not result.success:
         print(f"[错误] {result.error}", file=sys.stderr)
+        if result.quota is not None:
+            print(result.quota.to_line(), file=sys.stderr)
         return 1
 
     text = ""

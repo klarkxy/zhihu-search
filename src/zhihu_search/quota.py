@@ -91,7 +91,7 @@ class CircuitBreaker:
         """记录一次限流失败。"""
         with self._lock:
             self._failures += 1
-            self._last_failure_at = _time.monotonic()
+            self._last_failure_at = _time.time()
             if self._state == "half_open" or self._failures >= self._threshold:
                 self._state = "open"
 
@@ -109,7 +109,7 @@ class CircuitBreaker:
             self._maybe_half_open()
             remaining = 0.0
             if self._state == "open" and self._last_failure_at is not None:
-                elapsed = _time.monotonic() - self._last_failure_at
+                elapsed = _time.time() - self._last_failure_at
                 remaining = max(0.0, self._cooldown - elapsed)
             return BreakerInfo(state=self._state, remaining_cooldown=remaining)
 
@@ -120,13 +120,45 @@ class CircuitBreaker:
             self._failures = 0
             self._last_failure_at = None
 
+    def to_dict(self) -> dict:
+        """序列化熔断器状态（用于持久化）。"""
+        with self._lock:
+            return {
+                "state": self._state,
+                "failures": self._failures,
+                "last_failure_at": self._last_failure_at,
+            }
+
+    def restore(self, data: dict) -> None:
+        """从持久化数据恢复熔断器状态。字段异常时安全降级为 closed。"""
+        with self._lock:
+            state = data.get("state", "closed")
+            if state not in ("closed", "open", "half_open"):
+                state = "closed"
+            failures = data.get("failures", 0)
+            try:
+                failures = int(failures)
+            except (TypeError, ValueError):
+                failures = 0
+            if failures < 0:
+                failures = 0
+            last = data.get("last_failure_at")
+            if last is not None:
+                try:
+                    last = float(last)
+                except (TypeError, ValueError):
+                    last = None
+            self._state = state
+            self._failures = failures
+            self._last_failure_at = last
+
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
 
     def _maybe_half_open(self) -> None:
         if self._state == "open" and self._last_failure_at is not None:
-            if _time.monotonic() - self._last_failure_at >= self._cooldown:
+            if _time.time() - self._last_failure_at >= self._cooldown:
                 self._state = "half_open"
 
 
@@ -230,6 +262,7 @@ class QuotaTracker:
         self._breakers: dict[QuotaKind, CircuitBreaker] = {
             k: CircuitBreaker() for k in ("search", "trending", "ask")
         }
+        self._restore_breakers()
 
     # ------------------------------------------------------------------
     # 持久化
@@ -254,14 +287,20 @@ class QuotaTracker:
                     counts[k] = int(raw.get(k, 0))
                 except (TypeError, ValueError):
                     counts[k] = 0
-            return {"date": data["date"], "counts": counts}
+            return {
+                "date": data["date"],
+                "counts": counts,
+                "breakers": data.get("breakers", {}),
+            }
         except (OSError, json.JSONDecodeError, ValueError):
             return {"date": _today(), "counts": {"search": 0, "trending": 0, "ask": 0}}
 
     def _save(self) -> None:
+        data = dict(self._state)
+        data["breakers"] = {k: v.to_dict() for k, v in self._breakers.items()}
         try:
             self._file.write_text(
-                json.dumps(self._state, ensure_ascii=False, indent=2),
+                json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
         except OSError:
@@ -290,9 +329,9 @@ class QuotaTracker:
                 "date": _today(),
                 "counts": {"search": 0, "trending": 0, "ask": 0},
             }
+            for brk in self._breakers.values():
+                brk.reset()
             self._save()
-        for brk in self._breakers.values():
-            brk.reset()
 
     # ------------------------------------------------------------------
     # 熔断 API
@@ -303,12 +342,14 @@ class QuotaTracker:
         return self._breakers[kind].is_allowed()
 
     def record_failure(self, kind: QuotaKind) -> None:
-        """记录一次限流失败（触发熔断器计数）。"""
+        """记录一次限流失败（触发熔断器计数）并持久化。"""
         self._breakers[kind].record_failure()
+        self._save()
 
     def record_success(self, kind: QuotaKind) -> None:
-        """记录一次调用成功（复位熔断器）。"""
+        """记录一次调用成功（复位熔断器）并持久化。"""
         self._breakers[kind].record_success()
+        self._save()
 
     def breaker_info(self, kind: QuotaKind) -> BreakerInfo:
         """查询指定接口的熔断器状态。"""
@@ -317,6 +358,16 @@ class QuotaTracker:
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
+
+    def _restore_breakers(self) -> None:
+        """从持久化数据恢复熔断器状态（跨进程熔断保护）。"""
+        breakers_data = self._state.get("breakers", {})
+        if not isinstance(breakers_data, dict):
+            return
+        for kind in ("search", "trending", "ask"):
+            data = breakers_data.get(kind)
+            if isinstance(data, dict):
+                self._breakers[kind].restore(data)
 
     def _maybe_reset(self) -> None:
         if self._state.get("date") != _today():

@@ -259,3 +259,136 @@ def test_to_line_with_breaker(tracker: QuotaTracker) -> None:
     assert "搜索 5" in line
     assert "已熔断" in line
     assert "冷却剩余" in line
+
+
+# ---------------------------------------------------------------------------
+# 熔断跨进程持久化
+# ---------------------------------------------------------------------------
+
+
+def test_breaker_persistence_across_instances(tmp_path: Path) -> None:
+    """熔断器状态应跨进程持久化（新实例仍保持 open）。"""
+    t1 = QuotaTracker(base_dir=tmp_path)
+    t1.record_failure("search")
+    t1.record_failure("search")  # → OPEN
+    assert t1.is_allowed("search") is False
+    assert t1.snapshot().breakers["search"].state == "open"
+
+    # 新实例应继承熔断状态
+    t2 = QuotaTracker(base_dir=tmp_path)
+    assert t2.is_allowed("search") is False
+    assert t2.snapshot().breakers["search"].state == "open"
+    # 其他 kind 不受影响
+    assert t2.is_allowed("trending") is True
+    assert t2.snapshot().breakers["trending"].state == "closed"
+
+
+def test_breaker_closed_when_no_failures(tmp_path: Path) -> None:
+    """没有限流失败时，新实例的熔断器保持 closed。"""
+    t1 = QuotaTracker(base_dir=tmp_path)
+    t1.increment("search", 3)
+    t1.record_success("search")
+    t2 = QuotaTracker(base_dir=tmp_path)
+    assert t2.is_allowed("search") is True
+    assert t2.snapshot().breakers["search"].state == "closed"
+
+
+def test_breaker_reset_clears_persistence(tmp_path: Path) -> None:
+    """reset() 应清除持久化的熔断状态。"""
+    t1 = QuotaTracker(base_dir=tmp_path)
+    t1.record_failure("search")
+    t1.record_failure("search")
+    assert t1.is_allowed("search") is False
+
+    t1.reset()
+
+    t2 = QuotaTracker(base_dir=tmp_path)
+    assert t2.is_allowed("search") is True
+    assert t2.snapshot().breakers["search"].state == "closed"
+
+
+def test_older_quota_file_without_breakers(tmp_path: Path) -> None:
+    """旧版 quota.json 没有 breakers 字段时不应报错。"""
+    import json
+    from datetime import date
+
+    quota_file = tmp_path / "quota.json"
+    quota_file.write_text(
+        json.dumps({
+            "date": date.today().isoformat(),
+            "counts": {"search": 5, "trending": 0, "ask": 0},
+        }),
+        encoding="utf-8",
+    )
+    t = QuotaTracker(base_dir=tmp_path)
+    # 确认文件被读取（counts 保留），而非被日期重置跳过
+    assert t.snapshot().by_kind["search"]["used"] == 5
+    assert t.is_allowed("search") is True
+    assert t.snapshot().breakers["search"].state == "closed"
+
+
+def test_restore_corrupted_data_safe_degradation(tmp_path: Path) -> None:
+    """损坏的 breakers 字段应安全降级到 closed。"""
+    import json
+    from datetime import date
+
+    quota_file = tmp_path / "quota.json"
+    breaker_state = {
+        "state": "bogus",
+        "failures": -5,
+        "last_failure_at": "not-a-timestamp",
+    }
+    quota_file.write_text(
+        json.dumps({
+            "date": date.today().isoformat(),
+            "counts": {"search": 5, "trending": 0, "ask": 0},
+            "breakers": {"search": breaker_state},
+        }),
+        encoding="utf-8",
+    )
+    t = QuotaTracker(base_dir=tmp_path)
+    # 确认文件被读取（counts 保留），而非被日期重置跳过
+    assert t.snapshot().by_kind["search"]["used"] == 5
+    assert t.is_allowed("search") is True
+    assert t.snapshot().breakers["search"].state == "closed"
+    assert t.snapshot().breakers["search"].remaining_cooldown == 0
+
+
+def test_restore_breakers_field_not_dict(tmp_path: Path) -> None:
+    """breakers 字段不是 dict 时不应崩溃。"""
+    import json
+    from datetime import date
+
+    quota_file = tmp_path / "quota.json"
+    quota_file.write_text(
+        json.dumps({
+            "date": date.today().isoformat(),
+            "counts": {"search": 3, "trending": 0, "ask": 0},
+            "breakers": "corrupted-string",
+        }),
+        encoding="utf-8",
+    )
+    t = QuotaTracker(base_dir=tmp_path)
+    assert t.snapshot().by_kind["search"]["used"] == 3
+    assert t.is_allowed("search") is True
+    assert t.snapshot().breakers["search"].state == "closed"
+
+
+def test_restore_single_breaker_not_dict(tmp_path: Path) -> None:
+    """单个 breaker 的值不是 dict 时不应崩溃。"""
+    import json
+    from datetime import date
+
+    quota_file = tmp_path / "quota.json"
+    quota_file.write_text(
+        json.dumps({
+            "date": date.today().isoformat(),
+            "counts": {"search": 2, "trending": 0, "ask": 0},
+            "breakers": {"search": "not-a-dict"},
+        }),
+        encoding="utf-8",
+    )
+    t = QuotaTracker(base_dir=tmp_path)
+    assert t.snapshot().by_kind["search"]["used"] == 2
+    assert t.is_allowed("search") is True
+    assert t.snapshot().breakers["search"].state == "closed"

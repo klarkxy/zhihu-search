@@ -99,9 +99,13 @@ async def search(
         filter: 高级筛选表达式，仅 scope='web' 生效，例如
             ``host=="example.com" AND publish_time>=1778494631``。
     """
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
     result = await commands.run_search(
         query=query, scope=scope, count=count, filter=filter,
-        client=_get_client(),
+        client=client,
     )
     if not result.success:
         return _err(result.error or "未知错误", result)
@@ -128,9 +132,13 @@ async def ask(
         query: 用户问题（中文或英文均可）。
         model: 模型档位（fast / thinking / agent）。
     """
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
     result = await commands.run_ask(
         query=query, model=model,
-        client=_get_client(),
+        client=client,
     )
     if not result.success:
         return _err(result.error or "未知错误", result)
@@ -149,9 +157,13 @@ async def trending(limit: int = 30) -> dict:
     Args:
         limit: 返回条数 1-30，默认 30。
     """
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
     result = await commands.run_trending(
         limit=limit,
-        client=_get_client(),
+        client=client,
     )
     if not result.success:
         return _err(result.error or "未知错误", result)

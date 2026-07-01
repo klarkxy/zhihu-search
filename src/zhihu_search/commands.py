@@ -118,7 +118,7 @@ async def run_search(
         return CommandResult(
             success=False,
             error=_breaker_open_msg(kind, tracker),
-            quota=tracker.snapshot() if not owns else None,
+            quota=tracker.snapshot(),
         )
 
     try:
@@ -140,13 +140,13 @@ async def run_search(
         return CommandResult(
             success=False,
             error=str(e),
-            quota=tracker.snapshot() if not owns else None,
+            quota=tracker.snapshot(),
         )
     except McpError as e:
         return CommandResult(
             success=False,
             error=str(e),
-            quota=tracker.snapshot() if not owns else None,
+            quota=tracker.snapshot(),
         )
     except Exception as e:
         return CommandResult(success=False, error=f"未预期错误：{e}")
@@ -178,7 +178,7 @@ async def run_ask(
         return CommandResult(
             success=False,
             error=_breaker_open_msg(kind, tracker),
-            quota=tracker.snapshot() if not owns else None,
+            quota=tracker.snapshot(),
         )
 
     try:
@@ -195,13 +195,13 @@ async def run_ask(
         return CommandResult(
             success=False,
             error=str(e),
-            quota=tracker.snapshot() if not owns else None,
+            quota=tracker.snapshot(),
         )
     except McpError as e:
         return CommandResult(
             success=False,
             error=str(e),
-            quota=tracker.snapshot() if not owns else None,
+            quota=tracker.snapshot(),
         )
     except Exception as e:
         return CommandResult(success=False, error=f"未预期错误：{e}")
@@ -230,7 +230,7 @@ async def run_trending(
         return CommandResult(
             success=False,
             error=_breaker_open_msg(kind, tracker),
-            quota=tracker.snapshot() if not owns else None,
+            quota=tracker.snapshot(),
         )
 
     try:
@@ -247,13 +247,13 @@ async def run_trending(
         return CommandResult(
             success=False,
             error=str(e),
-            quota=tracker.snapshot() if not owns else None,
+            quota=tracker.snapshot(),
         )
     except McpError as e:
         return CommandResult(
             success=False,
             error=str(e),
-            quota=tracker.snapshot() if not owns else None,
+            quota=tracker.snapshot(),
         )
     except Exception as e:
         return CommandResult(success=False, error=f"未预期错误：{e}")
