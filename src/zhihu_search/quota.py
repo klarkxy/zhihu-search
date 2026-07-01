@@ -68,7 +68,7 @@ class CircuitBreaker:
     def __init__(
         self,
         failure_threshold: int = 2,
-        cooldown_seconds: int = 120,
+        cooldown_seconds: int = 21600,  # 6 小时：按每日配额尺度冷却
     ) -> None:
         self._threshold = failure_threshold
         self._cooldown = cooldown_seconds
