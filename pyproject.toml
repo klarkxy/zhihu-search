@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zhihu-search"
-version = "1.1.0"
+version = "1.2.0"
 description = "知乎开放平台的统一 MCP 封装"
 readme = "README.md"
 requires-python = ">=3.10"
