@@ -1,28 +1,72 @@
 # zhihu-search
 
-知乎开放平台的 stdio MCP 服务器。安装后，MCP 客户端可直接调用 `search`、`ask`、`trending` 三个工具，完成知乎站内搜索、全网搜索、知乎直答和热榜查询。
+知乎开放平台的统一 CLI + MCP + Skill 封装。**一个入口**覆盖搜索、直答和热榜，支持三种使用方式：
+
+- **CLI** → 终端直接搜索、提问、查看热榜（不需要任何 AI 客户端）
+- **MCP** → 以 stdio MCP 服务器方式暴露 `search`、`ask`、`trending` 三个工具给 AI 编程助手调用
+- **Skill** → 以 skills.sh 标准 skill 引导 agent 自动安装和配置
 
 ---
 
-## 快速安装
+## 快速开始
 
-### 让 AI 一键装好
+### CLI 直用（零配置）
 
-复制这段 prompt 给你的 AI 编程助手（Claude Code、Cursor、Codex、OpenCode 等），它会自动完成：
+```bash
+pip install zhihu-search
 
-> 请帮我安装并配置 zhihu-search 这个 MCP 服务器。先读取 https://raw.githubusercontent.com/klarkxy/zhihu-search/main/AGENT_SETUP.md，按步骤执行。Access Secret 不要发到聊天里，让我在本地终端执行保存命令。
+# 保存凭证
+zhihu-search --save-token "zh-your-secret"
 
-### 手动安装
+# 搜索
+zhihu-search search "RAG 评测方法" --scope zhihu --count 5
 
-先完成 [通用准备](setup/SETUP.md)（存凭证、验证连通性），再选对应客户端写入配置：
+# 直答
+zhihu-search ask "什么是多模态大模型？" --model thinking
 
-| 客户端 | 安装指南 |
+# 热榜
+zhihu-search trending --limit 10
+
+# JSON 输出（脚本消费）
+zhihu-search search "大模型" --format json
+```
+
+### MCP 模式（AI 编程助手）
+
+```bash
+zhihu-search serve
+```
+
+在你的 MCP 客户端配置中注册：
+
+```json
+{
+  "mcpServers": {
+    "zhihu-search": {
+      "command": "zhihu-search",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+然后 agent 就能调用 `search`、`ask`、`trending` 三个工具。
+
+各客户端详细配置见：
+
+| 客户端 | 指南 |
 |---|---|
 | Claude Code | [setup/claude-code.md](setup/claude-code.md) |
 | Codex | [setup/codex.md](setup/codex.md) |
 | HanaAgent | [setup/hanako-agent.md](setup/hanako-agent.md) |
 | OpenCode | [setup/opencode.md](setup/opencode.md) |
-| 其他 | [setup/SETUP.md](setup/SETUP.md) 中的通用配置 |
+| 通用 | [setup/SETUP.md](setup/SETUP.md) |
+
+### 让 AI 一键装好
+
+复制这段 prompt 给你的 AI 编程助手（Claude Code、Cursor、Codex 等），它会自动完成安装和配置：
+
+> 请帮我安装并配置 zhihu-search。先读取 https://raw.githubusercontent.com/klarkxy/zhihu-search/main/AGENT_SETUP.md，按步骤执行。Access Secret 不要发到聊天里，让我在本地终端执行保存命令。
 
 **安全提醒**：Access Secret 是你的知乎开发者凭证，永远不要粘贴到聊天记录、截图或公开仓库。
 
@@ -39,26 +83,55 @@
 | 直答 | `POST /v1/chat/completions` | 知乎自研大模型对话 |
 | 热榜 | `GET /api/v1/content/hot_list` | 当前知乎热榜 |
 
-本项目把这 4 个接口封装成一个 stdio MCP 服务器，对外暴露 3 个工具：
+本项目把这 4 个接口封装成 3 种接入方式：
 
-| 工具 | 转发到 | 用途 |
+| 方式 | 入口 | 适用场景 |
 |---|---|---|
-| `search` | 知乎搜索 / 全网搜索 | 找内容 |
-| `ask` | 直答（chat completions） | 让模型回答问题 |
-| `trending` | 热榜 | 查看当前热榜 |
+| **CLI** | `zhihu-search search/ask/trending` | 终端、脚本、CI |
+| **MCP** | `zhihu-search serve` | AI 编程助手持续调用 |
+| **Skill** | `skills/zhihu-search/SKILL.md` | Agent 自动安装和选模式 |
 
-只做参数校验、HTTP 转发、错误翻译、配额提示和 Markdown 格式化，不重新实现上游接口。代码量小，行为贴近知乎官方接口，排障路径短。
+不做缓存、客户端侧限流、多账号——保持简单，行为贴近知乎官方接口。
 
 ---
 
-## 工具说明
+## CLI 参考
+
+### `zhihu-search search <query>`
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `query` | `str` | 必填 | 搜索关键词，2-100 字符 |
+| `--scope` | `zhihu\|web` | `zhihu` | `zhihu` 站内搜索；`web` 全网搜索 |
+| `--count` | `int` | `10` | 返回条数；zhihu 上限 10，web 上限 20 |
+| `--filter` | `str` | `""` | 仅 `scope=web` 生效，例如 `host=="example.com"` |
+| `--format` | `markdown\|json` | `markdown` | 输出格式；json 时 stdout 只有 JSON |
+
+### `zhihu-search ask <query>`
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `query` | `str` | 必填 | 问题 |
+| `--model` | `fast\|thinking\|agent` | `fast` | 模型档位 |
+| `--format` | `markdown\|json` | `markdown` | 输出格式 |
+
+### `zhihu-search trending`
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `--limit` | `int` | `30` | 返回条数，上限 30 |
+| `--format` | `markdown\|json` | `markdown` | 输出格式 |
+
+---
+
+## MCP 工具参考
 
 ### `search(query, scope="zhihu"|"web", count=10, filter="")`
 
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `query` | `str` | 必填 | 搜索关键词，2-100 字符 |
-| `scope` | `"zhihu"|"web"` | `"zhihu"` | `zhihu` 站内搜索；`web` 全网搜索 |
+| `scope` | `"zhihu"\|"web"` | `"zhihu"` | `zhihu` 站内搜索；`web` 全网搜索 |
 | `count` | `int` | `10` | 返回条数；zhihu 上限 10，web 上限 20 |
 | `filter` | `str` | `""` | 仅 `scope="web"` 生效，例如 `host=="example.com"` |
 
@@ -69,7 +142,7 @@
 | 参数 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `query` | `str` | 必填 | 问题 |
-| `model` | `"fast"|"thinking"|"agent"` | `"fast"` | 模型档位 |
+| `model` | `"fast"\|"thinking"\|"agent"` | `"fast"` | 模型档位 |
 
 | 档位 | 对应模型 | 特点 |
 |---|---|---|
@@ -102,23 +175,48 @@
 
 ---
 
-## 本地配额提示
+## 熔断保护（Circuit Breaker）
 
-知乎官方没有稳定的 `X-RateLimit-*` 响应头。本项目维护一份本地调用计数（`~/.config/zhihu-search/quota.json`），按接口分桶：
+不同账号在知乎开放平台的额度不同，硬编码上限没有参考价值。本项目采用**熔断机制**：当某个接口返回限流错误（HTTP 429 或 `Code=30001`）时，熔断器开始计数。连续 `2` 次限流后，该接口自动熔断，所有请求立即失败并提示冷却剩余时间，**约 2 分钟后**自动恢复。
 
-| 类别 | 包含接口 | 默认上限 | 覆盖环境变量 |
+熔断状态按接口类别独立维护：
+
+| 类别 | 包含接口 | 熔断阈值 | 冷却时间 |
 |---|---|---|---|
-| `search` | 知乎搜索 / 全网搜索 | 5000 | `ZHIHU_DAILY_LIMIT_SEARCH` |
-| `trending` | 热榜 | 100 | `ZHIHU_DAILY_LIMIT_TRENDING` |
-| `ask` | 直答 | 100 | `ZHIHU_DAILY_LIMIT_ASK` |
+| `search` | 知乎搜索 / 全网搜索 | 连续 2 次限流 | 120 秒 |
+| `trending` | 热榜 | 连续 2 次限流 | 120 秒 |
+| `ask` | 直答 | 连续 2 次限流 | 120 秒 |
 
-旧变量 `ZHIHU_DAILY_LIMIT` 仍可用（三个桶同时设为同一值）。
-
-每次成功返回末尾附加一行配额进度：
+熔断器状态会在每次调用末尾提示。正常时：
 
 ```
-配额：搜索 12/5000 · 热榜 1/100 · 直答 0/100（2026-06-19T00:00:00 刷新）
+今日调用：搜索 12 · 热榜 1 · 直答 0
 ```
+
+熔断时：
+
+```
+今日调用：搜索 12 · 热榜 1 · 直答 0
+⚠ 搜索已熔断（冷却剩余 95 秒）
+```
+
+使用 `zhihu-search --quota` 查看全部状态：
+
+```
+今日调用：搜索 12 · 热榜 1 · 直答 0
+
+今日调用量：
+  搜索  12 次
+  热榜  1 次
+  直答  0 次
+
+熔断状态：
+  搜索  正常
+  热榜  已熔断（冷却剩余 95 秒）
+  直答  正常
+```
+
+使用 `zhihu-search --reset-quota` 可手动清零计数并重置所有熔断器。
 
 ---
 
@@ -131,8 +229,8 @@ python -m pip install -e ".[dev]"
 ```
 
 ```bash
-pytest          # 离线单元测试
-pytest -v      # 详细输出
+pytest                    # 离线单元测试
+pytest -v                 # 详细输出
 zhihu-search --check-token   # 凭证检查
 zhihu-search --probe         # 端到端探测
 ```
@@ -141,13 +239,12 @@ zhihu-search --probe         # 端到端探测
 
 ## 排障
 
-安装或配置遇到问题，先让 agent 读 [AGENT_SETUP.md](AGENT_SETUP.md)（agent 用）或 [setup/SETUP.md](setup/SETUP.md)（用户手动安装）。
-
 | 症状 | 处理位置 |
 |---|---|
-| `command not found: uvx` | setup/SETUP.md |
-| Token 无效 / 过期 | setup/SETUP.md |
+| `command not found: zhihu-search` | `pip install zhihu-search` |
+| Token 无效 / 过期 | [setup/SETUP.md](setup/SETUP.md) |
 | 客户端找不到工具 | 对应客户端的 setup/*.md |
+| CLI 报「凭证错误」 | `zhihu-search --save-token` |
 | 配额显示 `剩余: 0` | 等次日或提高上限 |
 
 ---
@@ -155,19 +252,26 @@ zhihu-search --probe         # 端到端探测
 ## 架构
 
 ```
-MCP 客户端（Claude Code / Cursor / ...）
-    │  stdio
-    ▼
-server.py（FastMCP）
-    │  search / ask / trending
-    ▼
-ZhihuRestClient（统一 HTTP REST 客户端）
-    │
-    ▼
-developer.zhihu.com（Bearer + X-Request-Timestamp）
+┌─ CLI ─────────────────────┐
+│  zhihu-search search ...   │
+│  zhihu-search ask ...      │  ───   commands.py（业务层）
+│  zhihu-search trending ... │         formatters.py（格式化层）
+└────────────────────────────┘         http_client.py（HTTP）
+                                         credentials.py
+┌─ MCP ─────────────────────┐              quota.py
+│  AI 编程助手               │
+│    → server.py（FastMCP）  │  ───   developer.zhihu.com
+│    → search / ask / trendy │        （Bearer + X-Request-Timestamp）
+└────────────────────────────┘
+
+┌─ Skill ────────────────────┐
+│  skills/zhihu-search/       │  ───   Agent 自动安装与配置
+│    SKILL.md                 │
+│  skills.sh.json             │
+└─────────────────────────────┘
 ```
 
-HTTP REST 比 SSE 简单：每个请求独立，无长连接、无重连逻辑。每个工具调用 = 一次 HTTP 请求 + 一次配额计数 + 一次响应组装。
+HTTP REST 比 SSE 简单：每个请求独立，无长连接、无重连逻辑。CLI/MCP 共享同一套业务层（`commands.py`）和格式化层（`formatters.py`）。
 
 ---
 

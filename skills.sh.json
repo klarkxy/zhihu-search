@@ -1,0 +1,10 @@
+{
+  "$schema": "https://skills.sh/schemas/v1/skills.json",
+  "skills": [
+    {
+      "name": "zhihu-search",
+      "path": "skills/zhihu-search/SKILL.md",
+      "group": "Search"
+    }
+  ]
+}

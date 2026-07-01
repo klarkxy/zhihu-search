@@ -30,10 +30,7 @@ SECRET = "zh1_testsecrettestsecr"
 
 @pytest.fixture
 def tracker(tmp_path):
-    return QuotaTracker(
-        base_dir=tmp_path,
-        limits={"search": 100, "trending": 50, "ask": 30},
-    )
+    return QuotaTracker(base_dir=tmp_path)
 
 
 def _envelope(code: int = 0, data: dict | None = None, message: str = "success") -> dict:
@@ -76,7 +73,6 @@ async def test_zhihu_search_success(tracker) -> None:
 
     assert result.data["Items"][0]["Title"] == "RAG 评测方法综述"
     assert result.quota.by_kind["search"]["used"] == 1
-    assert result.quota.by_kind["search"]["limit"] == 100
     # 其它桶不应被计入
     assert result.quota.by_kind["trending"]["used"] == 0
     assert result.quota.by_kind["ask"]["used"] == 0
