@@ -9,6 +9,7 @@ Flags:
 
 Commands (默认: serve):
     serve              启动 stdio MCP 服务器
+    openwebui          启动 OpenAPI 工具服务器
     search <query>     搜索知乎内容
     ask <query>        向知乎直答提问
     trending           查看知乎热榜
@@ -79,11 +80,21 @@ def _build_parser() -> argparse.ArgumentParser:
     # 子命令
     sub = p.add_subparsers(
         dest="command",
-        metavar="{search,ask,trending,serve}",
+        metavar="{search,ask,trending,serve,openwebui}",
     )
 
     # --- serve（显式入口）---
     sub.add_parser("serve", help="启动 stdio MCP 服务器（默认）。")
+
+    # --- openwebui ---
+    ow = sub.add_parser("openwebui", help="启动 Open WebUI OpenAPI 工具服务器。")
+    ow.add_argument("--host", default="127.0.0.1", help="监听地址。")
+    ow.add_argument("--port", type=int, default=8000, help="监听端口。")
+    ow.add_argument(
+        "--api-key",
+        default=None,
+        help="可选 API key。设置后工具接口要求 Authorization: Bearer <key>。",
+    )
 
     # --- search ---
     sp = sub.add_parser("search", help="搜索知乎内容。")
@@ -315,6 +326,12 @@ def main(argv: list[str] | None = None) -> int:
         from .server import main as server_main
 
         server_main()
+        return 0
+
+    if args.command == "openwebui":
+        from .openwebui import main as openwebui_main
+
+        openwebui_main(host=args.host, port=args.port, api_key=args.api_key)
         return 0
 
     try:

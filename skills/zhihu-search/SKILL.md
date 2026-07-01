@@ -1,132 +1,117 @@
 ---
 name: zhihu-search
-description: 知乎开放平台 CLI + MCP 集成：搜索、直答、热榜，支持命令行与 Agent 双模式接入
-tip: |
-  提供三种使用方式：
-  - CLI 直用：`zhihu-search search "问题"` → 终端直接看结果
-  - MCP 模式：配置 `zhihu-search serve` 暴露工具给 AI 编程助手
-  - Skill 模式：本 skill 教会 agent 安装、配置、选模式
+description: Use the zhihu-search CLI directly for live Zhihu search, Zhihu Zhida answers, and trending topics. Trigger when the user asks to search Zhihu, query Zhihu content, ask Zhihu Zhida, inspect Zhihu trending/hot list, compare Zhihu results, or fetch current information from developer.zhihu.com-backed Zhihu APIs.
 ---
 
 # zhihu-search
 
-知乎开放平台（developer.zhihu.com）的 CLI + MCP 封装。一个入口覆盖搜索、直答和热榜。
+Use `zhihu-search` as a live CLI tool first. This skill is not an installation wizard or MCP setup guide.
 
-## 安装
+## Core Rule
+
+When a user asks for Zhihu search, Zhihu Zhida, or Zhihu trending information:
+
+1. Check the CLI and credential state.
+2. Run the appropriate `zhihu-search` CLI command.
+3. Summarize the returned results with links and the quota line.
+4. Only discuss installation/configuration if the CLI is missing or credentials are unavailable.
+
+Never ask the user to paste an Access Secret into chat.
+
+## Preflight
+
+Run:
+
+```bash
+zhihu-search --check-token
+```
+
+If the command is missing, use one fallback:
+
+```bash
+uvx zhihu-search --check-token
+```
+
+If both are missing, explain that the CLI is not available and give the shortest local install command:
 
 ```bash
 pip install zhihu-search
 ```
 
-或从源码安装（开发者模式）：
+If credentials are missing, tell the user to create an Access Secret at <https://developer.zhihu.com/personal> and save it locally. Do not collect the secret in chat.
 
 ```bash
-git clone https://github.com/klarkxy/zhihu-search
-cd zhihu-search
-pip install -e ".[dev]"
+zhihu-search --save-token "<your Access Secret>"
 ```
 
-## 凭证
+## Commands
 
-需要先获取知乎开放平台 Access Secret（[开发者后台](https://developer.zhihu.com) → 应用管理 → 创建应用 → 复制 Access Secret）。
+### Search Zhihu
 
-保存方式（二选一）：
+Use for "搜知乎", "查知乎", "知乎上有没有", "找回答/文章/问题".
 
 ```bash
-# 方式 A：环境变量（推荐 CI / Docker）
-export ZHIHU_ACCESS_SECRET="zh-your-secret"
-
-# 方式 B：持久化到文件
-zhihu-search --save-token "zh-your-secret"
+zhihu-search search "<query>" --scope zhihu --count 5
 ```
 
-**安全警告**：Access Secret 等同密码。不要写入聊天记录、`.mcp.json`、截图或公开仓库。
+Use `--count 10` only when the user wants broader coverage.
 
-## 用法
+### Search Web
 
-### 方式 1：CLI 直用（不需要任何 MCP 客户端）
+Use when the user wants web-wide results through the Zhihu search API.
 
 ```bash
-# 搜索
-zhihu-search search "RAG 评测方法" --scope zhihu --count 5
+zhihu-search search "<query>" --scope web --count 10
+```
 
-# 全网搜索 + 高级筛选
-zhihu-search search "AI 论文" --scope web --count 10 --filter 'host=="arxiv.org"'
+For domain filtering:
 
-# 直答
-zhihu-search ask "什么是多模态大模型？" --model thinking
+```bash
+zhihu-search search "<query>" --scope web --count 10 --filter 'host=="example.com"'
+```
 
-# 热榜
+### Ask Zhida
+
+Use when the user wants a direct answer from Zhihu Zhida rather than a list of results.
+
+```bash
+zhihu-search ask "<question>" --model fast
+```
+
+Use `--model thinking` for complex analysis. Use `--model agent` only when the user explicitly wants the slower agent mode.
+
+### Trending
+
+Use when the user asks for Zhihu hot list, trending topics, or "现在知乎在聊什么".
+
+```bash
 zhihu-search trending --limit 10
-
-# JSON 输出（脚本消费）
-zhihu-search search "大模型" --format json
 ```
 
-### 方式 2：MCP 服务器（AI 编程助手调用）
+## Output Handling
+
+Prefer the default Markdown output for human-facing answers. Use JSON only when you need structured post-processing:
 
 ```bash
-zhihu-search serve
+zhihu-search search "<query>" --scope zhihu --count 5 --format json
 ```
 
-在 MCP 客户端（Claude Code / Cursor / Codex）的配置文件中注册：
+When answering the user:
 
-```json
-{
-  "mcpServers": {
-    "zhihu-search": {
-      "command": "zhihu-search",
-      "args": ["serve"]
-    }
-  }
-}
-```
+- Include the most relevant titles and links.
+- Preserve important source attribution from the CLI output.
+- Mention the quota/status line if present, especially when quota is low or a circuit breaker is open.
+- If results are weak or empty, say so clearly and suggest a narrower query.
 
-MCP 暴露三个工具：
+## Diagnostics
 
-| 工具 | 功能 | 参数 |
-|---|---|---|
-| `search` | 知乎/全网搜索 | `query`, `scope`(zhihu/web), `count`, `filter` |
-| `ask` | 知乎直答 | `query`, `model`(fast/thinking/agent) |
-| `trending` | 知乎热榜 | `limit` |
-
-### 方式 3：本 Skill（Agent 引导式安装）
-
-Agent 读取本 skill 后，应：
-
-1. 检查 Python 是否已安装 → 没有则引导安装
-2. 安装 `zhihu-search` 包 → `pip install zhihu-search`
-3. 检查凭证 → `zhihu-search --check-token`
-4. 若未配置凭证 → 引导用户从[开发者后台](https://developer.zhihu.com)获取，然后用 `--save-token` 保存
-5. 判断接入模式：
-   - 如果用户只是想快速查一个资料 → 用 CLI 模式（`zhihu-search search ...`）
-   - 如果用户要持续使用 → 配置 MCP 并注册到客户端
-6. 端到端验证 → `zhihu-search --probe`
-
-## 诊断
+Use these only when a CLI call fails or the user asks about status:
 
 ```bash
-# 检查凭证
-zhihu-search --check-token
-
-# 查看今日调用量与熔断状态
 zhihu-search --quota
-
-# 手动重置熔断器与计数
-zhihu-search --reset-quota
-
-# 端到端探测
 zhihu-search --probe
-
-# 帮助
+zhihu-search --reset-quota
 zhihu-search --help
-zhihu-search search --help
 ```
 
-> **熔断机制**：当某个接口被限流（连续 2 次）后，熔断器自动开启，冷却约 6 小时后试探恢复。状态通过 `--quota` 查看，或用 `--reset-quota` 手动复位。
-
-## 详细文档
-
-- [README.md](https://github.com/klarkxy/zhihu-search)
-- [AGENT_SETUP.md](https://github.com/klarkxy/zhihu-search/blob/main/AGENT_SETUP.md)
-- [开发者后台](https://developer.zhihu.com)
+`--reset-quota` is for local debugging. Do not use it casually.

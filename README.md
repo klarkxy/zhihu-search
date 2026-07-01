@@ -1,10 +1,11 @@
 # zhihu-search
 
-知乎开放平台的统一 CLI + MCP + Skill 封装。**一个入口**覆盖搜索、直答和热榜，支持三种使用方式：
+知乎开放平台的统一 CLI + MCP + OpenAPI + Skill 封装。**一个入口**覆盖搜索、直答和热榜，支持四种使用方式：
 
 - **CLI** → 终端直接搜索、提问、查看热榜（不需要任何 AI 客户端）
 - **MCP** → 以 stdio MCP 服务器方式暴露 `search`、`ask`、`trending` 三个工具给 AI 编程助手调用
-- **Skill** → 以 skills.sh 标准 skill 引导 agent 自动安装和配置
+- **OpenAPI** → 以 HTTP OpenAPI 工具服务器方式接入 Open WebUI
+- **Skill** → 以 skills.sh 标准 skill 引导 agent 直接调用 CLI 完成知乎查询
 
 ---
 
@@ -62,11 +63,24 @@ zhihu-search serve
 | OpenCode | [setup/opencode.md](setup/opencode.md) |
 | 通用 | [setup/SETUP.md](setup/SETUP.md) |
 
-### 让 AI 一键装好
+### Open WebUI / OpenAPI 模式
 
-复制这段 prompt 给你的 AI 编程助手（Claude Code、Cursor、Codex 等），它会自动完成安装和配置：
+```bash
+zhihu-search openwebui --host 0.0.0.0 --port 8000 --api-key "<bearer-token>"
+```
 
-> 请帮我安装并配置 zhihu-search。先读取 https://raw.githubusercontent.com/klarkxy/zhihu-search/main/AGENT_SETUP.md，按步骤执行。Access Secret 不要发到聊天里，让我在本地终端执行保存命令。
+Open WebUI 中添加 External Tool Server：
+
+- URL: `http://<server>:8000`
+- Authentication: Bearer token
+
+OpenAPI schema 会声明标准 HTTP Bearer 认证，工具接口为 `search`、`ask`、`trending`。
+
+### 让 AI 直接用 CLI 查
+
+安装好并保存凭证后，复制这段 prompt 给支持 skills 的 AI 编程助手：
+
+> 用 zhihu-search skill 搜一下知乎上关于「RAG 评测方法」的高质量内容，总结前 5 条并附链接。
 
 **安全提醒**：Access Secret 是你的知乎开发者凭证，永远不要粘贴到聊天记录、截图或公开仓库。
 
@@ -83,13 +97,14 @@ zhihu-search serve
 | 直答 | `POST /v1/chat/completions` | 知乎自研大模型对话 |
 | 热榜 | `GET /api/v1/content/hot_list` | 当前知乎热榜 |
 
-本项目把这 4 个接口封装成 3 种接入方式：
+本项目把这 4 个接口封装成 4 种接入方式：
 
 | 方式 | 入口 | 适用场景 |
 |---|---|---|
 | **CLI** | `zhihu-search search/ask/trending` | 终端、脚本、CI |
 | **MCP** | `zhihu-search serve` | AI 编程助手持续调用 |
-| **Skill** | `skills/zhihu-search/SKILL.md` | Agent 自动安装和选模式 |
+| **OpenAPI** | `zhihu-search openwebui` | Open WebUI 外部工具服务器 |
+| **Skill** | `skills/zhihu-search/SKILL.md` | Agent 按任务直接调用 CLI |
 
 不做缓存、客户端侧限流、多账号——保持简单，行为贴近知乎官方接口。
 
@@ -121,6 +136,14 @@ zhihu-search serve
 |---|---|---|---|
 | `--limit` | `int` | `30` | 返回条数，上限 30 |
 | `--format` | `markdown\|json` | `markdown` | 输出格式 |
+
+### `zhihu-search openwebui`
+
+| 参数 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `--host` | `str` | `127.0.0.1` | 监听地址 |
+| `--port` | `int` | `8000` | 监听端口 |
+| `--api-key` | `str` | 空 | 设置后要求 `Authorization: Bearer <token>` |
 
 ---
 
@@ -264,8 +287,14 @@ zhihu-search --probe         # 端到端探测
 │    → search / ask / trendy │        （Bearer + X-Request-Timestamp）
 └────────────────────────────┘
 
+┌─ OpenAPI ─────────────────┐
+│  Open WebUI                │
+│    → openwebui.py          │  ───   developer.zhihu.com
+│    → /search /ask /trending│
+└────────────────────────────┘
+
 ┌─ Skill ────────────────────┐
-│  skills/zhihu-search/       │  ───   Agent 自动安装与配置
+│  skills/zhihu-search/       │  ───   Agent 直接调用 CLI
 │    SKILL.md                 │
 │  skills.sh.json             │
 └─────────────────────────────┘
