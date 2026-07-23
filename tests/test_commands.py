@@ -34,6 +34,7 @@ def _envelope(code: int = 0, data: dict | None = None) -> dict:
 def _mock_tracker() -> MagicMock:
     """返回一个 MagicMock 替换 QuotaTracker，避免磁盘 IO。"""
     mock = MagicMock(spec=QuotaTracker)
+    mock.is_allowed.return_value = True
     snap = MagicMock()
     snap.to_line.return_value = "配额：搜索 0/100"
     snap.by_kind = {"search": {"used": 0, "limit": 100, "remaining": 100}}
@@ -43,6 +44,51 @@ def _mock_tracker() -> MagicMock:
     mock.snapshot.return_value = snap
     mock.increment.return_value = snap
     return mock
+
+
+def _mock_api_result(data):
+    result = MagicMock()
+    result.data = data
+    result.quota = MagicMock()
+    result.headers = {"x-request-id": "test-request"}
+    return result
+
+
+# ---------------------------------------------------------------------------
+# generic runner
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_command_handles_common_success_flow():
+    mock_client = MagicMock(spec=ZhihuRestClient)
+    mock_client.quota_tracker = _mock_tracker()
+    api_result = _mock_api_result(["arbitrary", "payload"])
+    call = AsyncMock(return_value=api_result)
+
+    result = await commands._run_command("user", call, client=mock_client)
+
+    assert result.success is True
+    assert result.data == ["arbitrary", "payload"]
+    assert result.quota is api_result.quota
+    assert result.headers == {"x-request-id": "test-request"}
+    call.assert_awaited_once_with(mock_client)
+    mock_client.quota_tracker.is_allowed.assert_called_once_with("user")
+    mock_client.quota_tracker.record_success.assert_called_once_with("user")
+
+
+@pytest.mark.asyncio
+async def test_run_command_records_rate_limit_failure():
+    mock_client = MagicMock(spec=ZhihuRestClient)
+    mock_client.quota_tracker = _mock_tracker()
+    call = AsyncMock(side_effect=RateLimited("PDF 限流"))
+
+    result = await commands._run_command("pdf", call, client=mock_client)
+
+    assert result.success is False
+    assert result.error == "PDF 限流"
+    mock_client.quota_tracker.record_failure.assert_called_once_with("pdf")
+    mock_client.quota_tracker.record_success.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -228,3 +274,105 @@ async def test_run_trending_error():
 
     assert result.success is False
     assert result.error is not None
+
+
+# ---------------------------------------------------------------------------
+# new user / PDF / PPT wrappers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_user_contents_passes_all_options():
+    mock_client = MagicMock()
+    mock_client.quota_tracker = _mock_tracker()
+    mock_client.user_contents = AsyncMock(
+        return_value=_mock_api_result({"Items": [{"type": "answer"}]})
+    )
+
+    result = await commands.run_user_contents(
+        content_type="answer",
+        offset="next-offset",
+        limit=7,
+        sort_field="updated_time",
+        sort_order="asc",
+        oauth_token="oauth-user-token",
+        client=mock_client,
+    )
+
+    assert result.success is True
+    mock_client.user_contents.assert_awaited_once_with(
+        content_type="answer",
+        offset="next-offset",
+        limit=7,
+        sort_field="updated_time",
+        sort_order="asc",
+        oauth_token="oauth-user-token",
+    )
+    mock_client.quota_tracker.record_success.assert_called_once_with("user")
+
+
+@pytest.mark.asyncio
+async def test_run_favlist_contents_passes_identifier_and_pagination():
+    mock_client = MagicMock()
+    mock_client.quota_tracker = _mock_tracker()
+    mock_client.favlist_contents = AsyncMock(
+        return_value=_mock_api_result({"Items": []})
+    )
+
+    result = await commands.run_favlist_contents(
+        favlist_id=42,
+        offset=3,
+        limit=9,
+        oauth_token="oauth-user-token",
+        client=mock_client,
+    )
+
+    assert result.success is True
+    mock_client.favlist_contents.assert_awaited_once_with(
+        favlist_url_token=None,
+        favlist_id=42,
+        offset=3,
+        limit=9,
+        oauth_token="oauth-user-token",
+    )
+    mock_client.quota_tracker.record_success.assert_called_once_with("user")
+
+
+@pytest.mark.asyncio
+async def test_run_pdf_upload_accepts_non_dict_payload():
+    mock_client = MagicMock()
+    mock_client.quota_tracker = _mock_tracker()
+    mock_client.upload_pdf = AsyncMock(
+        return_value=_mock_api_result(["file-id", "ready"])
+    )
+
+    result = await commands.run_pdf_upload("document.pdf", client=mock_client)
+
+    assert result.success is True
+    assert result.data == ["file-id", "ready"]
+    mock_client.upload_pdf.assert_awaited_once_with(file_path="document.pdf")
+    mock_client.quota_tracker.record_success.assert_called_once_with("pdf")
+
+
+@pytest.mark.asyncio
+async def test_run_ppt_create_passes_task_options():
+    mock_client = MagicMock()
+    mock_client.quota_tracker = _mock_tracker()
+    mock_client.create_ppt_generation_task = AsyncMock(
+        return_value=_mock_api_result({"task_id": "ppt-task"})
+    )
+
+    result = await commands.run_ppt_create(
+        "https://www.zhihu.com/question/1/answer/2",
+        num_pages=15,
+        idempotency_key="ppt-key",
+        client=mock_client,
+    )
+
+    assert result.success is True
+    mock_client.create_ppt_generation_task.assert_awaited_once_with(
+        resource_url="https://www.zhihu.com/question/1/answer/2",
+        num_pages=15,
+        idempotency_key="ppt-key",
+    )
+    mock_client.quota_tracker.record_success.assert_called_once_with("ppt")

@@ -1,117 +1,112 @@
 ---
 name: zhihu-search
-description: Use the zhihu-search CLI directly for live Zhihu search, Zhihu Zhida answers, and trending topics. Trigger when the user asks to search Zhihu, query Zhihu content, ask Zhihu Zhida, inspect Zhihu trending/hot list, compare Zhihu results, or fetch current information from developer.zhihu.com-backed Zhihu APIs.
+description: Use uvx to run zhihu-search for live Zhihu search, Zhida answers, trending topics, authorized user data, PDF parsing, PPT generation, and OAuth helper flows.
 ---
 
 # zhihu-search
 
-Use `zhihu-search` as a live CLI tool first. This skill is not an installation wizard or MCP setup guide.
+This Skill is the preferred entry and uses `uvx zhihu-search` for every operation. Installation
+starts in [setup/README.md](../../setup/README.md); agent-led setup and optional high-frequency MCP
+configuration belong in [AGENT_SETUP.md](../../AGENT_SETUP.md).
 
-## Core Rule
+## Core workflow
 
-When a user asks for Zhihu search, Zhihu Zhida, or Zhihu trending information:
+1. For all operations except `oauth-url` and `oauth-token`, check credentials:
 
-1. Check the CLI and credential state.
-2. Run the appropriate `zhihu-search` CLI command.
-3. Summarize the returned results with links and the quota line.
-4. Only discuss installation/configuration if the CLI is missing or credentials are unavailable.
+   ```bash
+   uvx zhihu-search --check-token
+   ```
 
-Never ask the user to paste an Access Secret into chat.
+2. Run the narrowest command that satisfies the request.
+3. Return useful titles, links, task state and the quota line.
+4. If `uvx` or credentials are unavailable, stop and point to `setup/README.md`.
 
-## Preflight
+Never ask the user to paste an Access Secret, OAuth app key or user OAuth token into chat.
 
-Run:
+## Task routing
 
-```bash
-zhihu-search --check-token
-```
-
-If the command is missing, use one fallback:
-
-```bash
-uvx zhihu-search --check-token
-```
-
-If both are missing, explain that the CLI is not available and give the shortest local install command:
+### Search, answers and trends
 
 ```bash
-pip install zhihu-search
+uvx zhihu-search search "<query>" --scope zhihu --count 5
+uvx zhihu-search search "<query>" --scope web --count 10
+uvx zhihu-search ask "<question>" --model fast
+uvx zhihu-search trending --limit 10
 ```
 
-If credentials are missing, tell the user to create an Access Secret at <https://developer.zhihu.com/personal> and save it locally. Do not collect the secret in chat.
+Use `--filter 'host=="example.com"'` only for web search. Keep `--search-db all` unless the user
+specifically requests `realtime` or `static`. Use `thinking` for complex Zhida analysis and `agent`
+only when the user explicitly accepts a slower request.
+
+### User data
 
 ```bash
-zhihu-search --save-token "<your Access Secret>"
+uvx zhihu-search user-contents --content-type all --limit 20
+uvx zhihu-search user-followees --limit 20
+uvx zhihu-search user-collections --limit 20
+uvx zhihu-search user-favlists --limit 20
+uvx zhihu-search favlist-contents --url-token 123456789 --limit 20
 ```
 
-## Commands
+Without `ZHIHU_OAUTH_TOKEN`, these commands query the calling developer's own data. For another
+authorized user, configure that token locally without echoing it. Pass `Paging.NextOffset` back
+unchanged through `--offset`. `favlist-contents` requires exactly one of `--url-token` or `--id`;
+do not invent pagination for collections or favorite-list discovery.
 
-### Search Zhihu
+### PDF parsing
 
-Use for "搜知乎", "查知乎", "知乎上有没有", "找回答/文章/问题".
+Only upload a local PDF that the user explicitly placed in scope. Maximum size is 100 MB.
 
 ```bash
-zhihu-search search "<query>" --scope zhihu --count 5
+uvx zhihu-search pdf-upload "<path.pdf>" --format json
+uvx zhihu-search pdf-create "<file_id>"
+uvx zhihu-search pdf-status "<task_id>"
 ```
 
-Use `--count 10` only when the user wants broader coverage.
+Use the uploaded `file_id` within 24 hours. Preserve IDs exactly. Status is asynchronous; do not
+poll aggressively, and treat successful result URLs as short-lived.
 
-### Search Web
+### PPT generation
 
-Use when the user wants web-wide results through the Zhihu search API.
+The source must be a supported Zhihu answer or article URL. Page count must be 6–21.
 
 ```bash
-zhihu-search search "<query>" --scope web --count 10
+uvx zhihu-search ppt-create "<zhihu_resource_url>" --pages 12
+uvx zhihu-search ppt-status "<task_id>"
 ```
 
-For domain filtering:
+Use an idempotency key when retrying task creation, and never reuse it for different inputs.
+
+### OAuth helpers
+
+These commands do not use the developer Access Secret:
 
 ```bash
-zhihu-search search "<query>" --scope web --count 10 --filter 'host=="example.com"'
+uvx zhihu-search oauth-url "<app_id>" "<redirect_uri>"
+uvx zhihu-search oauth-token "<app_id>" "<redirect_uri>" "<authorization_code>"
 ```
 
-### Ask Zhida
+Require `ZHIHU_OAUTH_APP_KEY` locally before token exchange. Never place it in arguments or chat,
+and do not invent undocumented state, scopes, PKCE, refresh/revoke or user-info flows.
 
-Use when the user wants a direct answer from Zhihu Zhida rather than a list of results.
+## Secret and surface safety
+
+- Never expose Access Secret, OAuth app key or OAuth token in chat, logs, screenshots or commits.
+- Prefer `ZHIHU_OAUTH_APP_KEY` and `ZHIHU_OAUTH_TOKEN`; do not generate commands containing them.
+- Upload only user-scoped local files.
+- `pdf-upload`, `oauth-url` and `oauth-token` remain CLI/Python-only.
+- Model-facing tools must never accept a local path, app key or OAuth token.
+- Preserve opaque offsets, `file_id`, `task_id` and expiring result URLs exactly.
+
+## Output and diagnostics
+
+Use Markdown for people and `--format json` only for structured processing. State when results are
+weak or empty; for asynchronous work, report the current state and query again only when useful.
 
 ```bash
-zhihu-search ask "<question>" --model fast
+uvx zhihu-search --quota
+uvx zhihu-search --probe
+uvx zhihu-search --help
 ```
 
-Use `--model thinking` for complex analysis. Use `--model agent` only when the user explicitly wants the slower agent mode.
-
-### Trending
-
-Use when the user asks for Zhihu hot list, trending topics, or "现在知乎在聊什么".
-
-```bash
-zhihu-search trending --limit 10
-```
-
-## Output Handling
-
-Prefer the default Markdown output for human-facing answers. Use JSON only when you need structured post-processing:
-
-```bash
-zhihu-search search "<query>" --scope zhihu --count 5 --format json
-```
-
-When answering the user:
-
-- Include the most relevant titles and links.
-- Preserve important source attribution from the CLI output.
-- Mention the quota/status line if present, especially when quota is low or a circuit breaker is open.
-- If results are weak or empty, say so clearly and suggest a narrower query.
-
-## Diagnostics
-
-Use these only when a CLI call fails or the user asks about status:
-
-```bash
-zhihu-search --quota
-zhihu-search --probe
-zhihu-search --reset-quota
-zhihu-search --help
-```
-
-`--reset-quota` is for local debugging. Do not use it casually.
+`uvx zhihu-search --reset-quota` is for local debugging only; do not use it casually.

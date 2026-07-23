@@ -11,6 +11,9 @@
 - ``search`` ：知乎搜索 + 全网搜索
 - ``trending``：热榜
 - ``ask``    ：直答（含 fast / thinking / agent 三个模型）
+- ``user``   ：用户内容、关注、收藏夹等
+- ``pdf``    ：PDF 上传与解析任务
+- ``ppt``    ：PPT 生成任务
 
 存储位置：``~/.config/zhihu-search/quota.json``
 覆盖位置：通过 ``ZHIHU_SEARCH_HOME`` 环境变量。
@@ -28,7 +31,16 @@ from threading import Lock
 from typing import Literal, Optional
 
 
-QuotaKind = Literal["search", "trending", "ask"]
+QuotaKind = Literal["search", "trending", "ask", "user", "pdf", "ppt"]
+
+QUOTA_KINDS: tuple[QuotaKind, ...] = (
+    "search",
+    "trending",
+    "ask",
+    "user",
+    "pdf",
+    "ppt",
+)
 
 _QUOTA_FILE = "quota.json"
 
@@ -36,6 +48,9 @@ _KIND_LABELS: dict[str, str] = {
     "search": "搜索",
     "trending": "热榜",
     "ask": "直答",
+    "user": "用户",
+    "pdf": "PDF",
+    "ppt": "PPT",
 }
 
 # ---------------------------------------------------------------------------
@@ -260,7 +275,7 @@ class QuotaTracker:
         self._state = self._load()
         # 熔断器（每个 kind 独立）
         self._breakers: dict[QuotaKind, CircuitBreaker] = {
-            k: CircuitBreaker() for k in ("search", "trending", "ask")
+            kind: CircuitBreaker() for kind in QUOTA_KINDS
         }
         self._restore_breakers()
 
@@ -275,25 +290,25 @@ class QuotaTracker:
 
     def _load(self) -> dict:
         if not self._file.is_file():
-            return {"date": _today(), "counts": {"search": 0, "trending": 0, "ask": 0}}
+            return {"date": _today(), "counts": _empty_counts()}
         try:
             data = json.loads(self._file.read_text(encoding="utf-8"))
             if data.get("date") != _today():
-                return {"date": _today(), "counts": {"search": 0, "trending": 0, "ask": 0}}
+                return {"date": _today(), "counts": _empty_counts()}
             raw = data.get("counts") or {}
             counts: dict[str, int] = {}
-            for k in ("search", "trending", "ask"):
+            for kind in QUOTA_KINDS:
                 try:
-                    counts[k] = int(raw.get(k, 0))
+                    counts[kind] = int(raw.get(kind, 0))
                 except (TypeError, ValueError):
-                    counts[k] = 0
+                    counts[kind] = 0
             return {
                 "date": data["date"],
                 "counts": counts,
                 "breakers": data.get("breakers", {}),
             }
         except (OSError, json.JSONDecodeError, ValueError):
-            return {"date": _today(), "counts": {"search": 0, "trending": 0, "ask": 0}}
+            return {"date": _today(), "counts": _empty_counts()}
 
     def _save(self) -> None:
         data = dict(self._state)
@@ -327,7 +342,7 @@ class QuotaTracker:
         with self._lock:
             self._state = {
                 "date": _today(),
-                "counts": {"search": 0, "trending": 0, "ask": 0},
+                "counts": _empty_counts(),
             }
             for brk in self._breakers.values():
                 brk.reset()
@@ -364,7 +379,7 @@ class QuotaTracker:
         breakers_data = self._state.get("breakers", {})
         if not isinstance(breakers_data, dict):
             return
-        for kind in ("search", "trending", "ask"):
+        for kind in QUOTA_KINDS:
             data = breakers_data.get(kind)
             if isinstance(data, dict):
                 self._breakers[kind].restore(data)
@@ -373,12 +388,12 @@ class QuotaTracker:
         if self._state.get("date") != _today():
             self._state = {
                 "date": _today(),
-                "counts": {"search": 0, "trending": 0, "ask": 0},
+                "counts": _empty_counts(),
             }
 
     def _build_snapshot(self) -> QuotaSnapshot:
         by_kind: dict[str, dict[str, int]] = {}
-        for kind in ("search", "trending", "ask"):
+        for kind in QUOTA_KINDS:
             used = int(self._state["counts"].get(kind, 0))
             by_kind[kind] = {"used": used}
         return QuotaSnapshot(
@@ -391,6 +406,10 @@ class QuotaTracker:
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
+
+def _empty_counts() -> dict[str, int]:
+    return {kind: 0 for kind in QUOTA_KINDS}
 
 
 def _today() -> str:
@@ -408,4 +427,5 @@ __all__ = [
     "CircuitBreaker",
     "BreakerInfo",
     "QuotaKind",
+    "QUOTA_KINDS",
 ]

@@ -1,96 +1,39 @@
-# HanaAgent 安装指南
+# HanaAgent / OpenHanako 配置
 
-## 目标
+先完成 [通用准备](README.md)。
 
-在 HanaAgent（OpenHanako）中接入 `zhihu-search` MCP 服务器，使其通过 `mcp_connectors_status` 可见。
+## 配置
 
-## 前提
+打开 `~/.hanako/plugin-data/mcp/config.json`，在 `global.mcp.connectors` 数组中加入：
 
-已完成 [通用准备](../setup/README.md) 中的凭证保存和连通性验证。
-
-## 配置文件位置
-
-HanaAgent 的 MCP connector 配置在：
-
-```
-~/.hanako-dev/plugin-data/mcp/config.json
-```
-
-这是一个 JSON 文件，connector 定义在 `global.mcp.connectors` 数组中。
-
-## 配置内容
-
-在 `connectors` 数组末尾新增一个对象（保留已有的 `MiniMax`、`MiniMax-MCP`、`context7` 等条目）：
+只有 OpenHanako 开发环境才使用 `~/.hanako-dev/...`。
 
 ```json
 {
   "id": "zhihu",
   "name": "zhihu",
-  "description": "知乎开放平台 MCP 封装",
+  "description": "知乎开放平台 MCP",
   "transport": "stdio",
-  "url": "",
-  "command": "zhihu-search",
-  "args": [],
-  "cwd": "",
+  "command": "uvx",
+  "args": ["zhihu-search", "serve", "--tools", "compact"],
   "env": {},
-  "headers": {},
-  "registryUrl": "",
-  "timeout": 0,
-  "authType": "none",
-  "authorizationToken": "",
-  "oauthClientId": "",
-  "oauthClientSecret": "",
-  "clientIdSource": "",
-  "oauth": {
-    "accessToken": "",
-    "refreshToken": "",
-    "tokenType": "",
-    "tokenEndpoint": "",
-    "scope": "",
-    "expiresIn": 0,
-    "expiresAt": 0,
-    "obtainedAt": 0
-  },
   "autoStart": true,
-  "autoReconnect": true,
-  "tools": []
+  "autoReconnect": true
 }
 ```
 
-`tools` 初始为空，HanaAgent 首次连接成功后会自动从 MCP 服务器拉取工具列表并填充。
-
-> 如果 `zhihu-search` 不在 PATH 上，用绝对路径：
-> ```json
-> "command": "C:\\Users\\<用户名>\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\zhihu-search.exe"
-> ```
+保留数组中已有的其他 connector，不要把 Access Secret 或 OAuth token 写进这里。首次连接后，HanaAgent 会自动读取工具列表。
+如需一次暴露全部 13 个工具，将 `compact` 改为 `full`；其他开关见
+[通用安装说明](README.md#3-配置-mcp高频使用)。
 
 ## 重启
 
-关闭并重新打开 HanaAgent 桌面端。connector 在启动时自动加载。
+关闭并重新打开 HanaAgent / OpenHanako。
 
 ## 验证
 
-重启后，在 HanaAgent 对话中发送：
+发送：
 
-```
-搜索知乎上 "RAG 检索增强生成"
-```
+> 用 zhihu 搜索知乎上的“RAG 评测方法”，返回 3 条结果。
 
-```
-问知乎直答 "什么是 ReAct Agent"
-```
-
-```
-看看知乎热榜
-```
-
-如果 HanaAgent 的工具列表中出现了 `mcp__zhihu-search__search`、`mcp__zhihu-search__ask`、`mcp__zhihu-search__trending`，即表示成功。
-
-## 排障
-
-| 症状 | 排查 |
-|---|---|
-| `mcp_connectors_status` 中无 `zhihu` | 确认配置文件已保存；确认已重启 HanaAgent |
-| connector 状态 `stopped` | 检查 `command` 路径是否正确；在终端直接运行 `zhihu-search --check-token` 看是否报错 |
-| `Token 已过期或无效` | 回通用准备重新执行 `--save-token` |
-| 工具列表为空 | 首次连接后需等待几秒；如长时间为空，检查 stderr 日志 |
+如果 connector 未启动、工具为空或调用失败，查看 [通用排障](README.md#通用排障)。
