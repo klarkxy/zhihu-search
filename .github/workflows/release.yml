@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - "v*"
-  release:
-    types: [published]
   workflow_dispatch:
 
 jobs:
@@ -20,8 +18,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install build tooling
-        run: python -m pip install --upgrade build
+      - name: Install build and test tooling
+        run: |
+          python -m pip install --upgrade build
+          python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest
 
       - name: Build sdist and wheel
         run: python -m build

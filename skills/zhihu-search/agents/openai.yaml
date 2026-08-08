@@ -1,0 +1,7 @@
+interface:
+  display_name: "Zhihu Search"
+  short_description: "主动搜索资料、核实来源、获取知乎直答与当前热点讨论"
+  default_prompt: "Use $zhihu-search to research this question proactively, prefer the zhihu MCP tools, and return source links when available."
+
+policy:
+  allow_implicit_invocation: true

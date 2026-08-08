@@ -7,7 +7,7 @@
 
 | 顺序 | 方式 | 适合场景 |
 |---:|---|---|
-| 1 | **Skill** | 推荐；让 Agent 自动选择并执行正确的 CLI 命令 |
+| 1 | **Skill** | 推荐；让 Agent 主动识别任务，优先 MCP、回退 CLI |
 | 2 | **CLI** | 临时查询、脚本和调试 |
 | 3 | **MCP** | 在 AI 客户端中高频、持续调用 |
 | 4 | **OpenWebUI** | 少数需要 HTTP 工具服务器的场景 |
@@ -17,10 +17,13 @@
 安装 Skill：
 
 ```bash
-npx skills add klarkxy/zhihu-search --skill zhihu-search
+npx skills add klarkxy/zhihu-search --skill zhihu-search -g -a codex -y
 ```
 
-Skill 使用 `uvx zhihu-search` 执行任务，因此本机还需安装
+`-g` 会让 Codex 在所有仓库中发现该 Skill；只有明确需要项目隔离时才去掉
+`-g`。具体范围规则见 [skills CLI 安装范围](https://github.com/vercel-labs/skills#installation-scope)。
+Skill 在已注册 `zhihu` MCP 时优先调用 `search`、`ask`、`trending`，
+MCP 不可用时才回退 `uvx zhihu-search`。因此本机还需安装
 [uv](https://docs.astral.sh/uv/getting-started/installation/)。`uvx` 会按需
 创建隔离环境，无需长期安装 Python 包。
 
@@ -108,6 +111,9 @@ uvx zhihu-search serve --tools full
   }
 }
 ```
+
+注册 MCP 后，`zhihu-search` Skill 会优先使用这三个核心工具，避免重复执行
+同一条 CLI 查询。
 
 客户端指南：
 

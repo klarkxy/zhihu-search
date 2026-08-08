@@ -4,7 +4,7 @@
 
 | 顺序 | 方式 | 适合场景 |
 |---:|---|---|
-| 1 | Skill | 推荐；让 Agent 自动完成查询 |
+| 1 | Skill | 推荐；主动识别任务，优先 MCP、回退 CLI |
 | 2 | CLI | 临时调用或脚本 |
 | 3 | MCP | AI 客户端高频使用 |
 | 4 | OpenWebUI | 需要 HTTP 工具服务器 |
@@ -34,10 +34,12 @@ uvx zhihu-search --probe
 ## 1. 安装 Skill（推荐）
 
 ```bash
-npx skills add klarkxy/zhihu-search --skill zhihu-search
+npx skills add klarkxy/zhihu-search --skill zhihu-search -g -a codex -y
 ```
 
-安装后直接让 Agent 使用 `zhihu-search` Skill。它会根据任务选择合适的
+`-g` 是跨仓库默认；只有用户明确需要隔离时才去掉 `-g`，安装到当前项目。
+安装后重新打开 Codex 任务。Skill 会根据任务选择 `search`、`ask` 或
+`trending`；如果已经注册 `zhihu` MCP 则优先调用 MCP，否则回退对应的
 `uvx zhihu-search` 命令。
 
 ## 2. 直接使用 CLI
@@ -74,6 +76,7 @@ compact 只暴露 `search`、`ask`、`trending` 和 `other`。`other` 可在当�
 | HanaAgent / OpenHanako | [hanako-agent.md](hanako-agent.md) |
 
 MCP 会读取本机保存的凭证，不需要在客户端配置中添加密钥。
+注册后，Skill 会优先使用 MCP 的三个核心工具。
 
 ## 4. OpenWebUI（少数场景）
 

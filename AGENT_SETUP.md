@@ -1,7 +1,8 @@
 # Agent 安装与验证指南
 
-默认安装 `zhihu-search` Skill。CLI 适合临时调用；只有用户明确表示会高频
-使用时才配置 MCP；OpenWebUI 放在最后考虑。
+默认全局安装 `zhihu-search` Skill。CLI 适合临时调用；只有用户明确表示会
+高频使用时才配置 MCP；MCP 已存在时 Skill 必须优先调用核心 MCP 工具，CLI
+只作回退。OpenWebUI 放在最后考虑。
 
 完成标准：目标入口真实调用成功，且所有密钥都没有进入聊天、日志或客户端
 配置。
@@ -37,15 +38,19 @@ uvx zhihu-search --probe
 ## 2. 优先安装 Skill
 
 ```bash
-npx skills add klarkxy/zhihu-search --skill zhihu-search
+npx skills add klarkxy/zhihu-search --skill zhihu-search -g -a codex -y
 ```
+
+这是 Codex 的跨仓库默认。其他客户端应把 `codex` 替换为对应 agent；只有
+用户明确要求项目隔离时才去掉 `-g`。
 
 让目标 Agent 重新加载 Skill，然后真实执行一次查询：
 
-> 使用 zhihu-search 搜索知乎上的“RAG 评测方法”，返回 2 条并附链接。
+> 帮我查一下最近主流的 RAG 评测方法，返回 2 条并附来源链接。
 
-Skill 能被发现、查询成功且返回链接，即完成默认安装。不要为了单次任务继续
-安装 MCP。
+Skill 能在未点名知乎时被发现、查询成功且返回链接，即完成默认安装。不要为
+单次任务继续安装 MCP；如果 MCP 已存在，确认 Skill 使用 MCP 而不是重复运行
+CLI。
 
 ## 3. CLI 作为直接入口
 
@@ -92,7 +97,7 @@ args:    zhihu-search serve --tools compact
 1. 保留所有已有 MCP server，只新增或更新 `zhihu`。
 2. 不写入任何知乎凭证。
 3. 写前、写后都解析 JSON 或 TOML。
-4. 让用户重启客户端，再验证工具列表和一次真实 `search`。
+4. 让用户重启客户端，再用未点名知乎的资料查询验证一次真实 `search`。
 
 compact 启动时应看到 4 个工具；full 启动时应看到 13 个。不要擅自结束
 用户的客户端进程。
