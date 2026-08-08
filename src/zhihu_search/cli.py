@@ -312,15 +312,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _print_credentials_info(creds: credentials.Credentials) -> None:
-    print(f"OK  Access Secret 来源：{creds.source}")
-    if creds.path:
-        print(f"    文件：{creds.path}")
-    masked = (
-        creds.access_secret[:4] + "…" + creds.access_secret[-2:]
-        if len(creds.access_secret) > 8
-        else "(过短)"
-    )
-    print(f"    预览：{masked}")
+    # This output is often captured by an Agent or CI log.  The source is
+    # enough to diagnose precedence without disclosing any part of the secret
+    # or the user-specific credentials path.
+    print(f"OK  Access Secret 已配置（来源：{creds.source}）")
 
 
 async def _probe() -> int:

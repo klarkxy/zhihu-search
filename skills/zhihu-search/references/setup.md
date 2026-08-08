@@ -18,8 +18,13 @@ Codex task after installation so the Skill catalog reloads.
 
 ```bash
 uvx --version
+uvx zhihu-search --version
 uvx zhihu-search --check-token
 ```
+
+`--check-token` reports only configuration status and source. It must not print a secret fragment
+or a user-specific credentials path. `--probe` performs one real `hot_list(limit=1)` request, so
+use it only when an end-to-end upstream check is necessary.
 
 If credentials are missing, direct the user to the Zhihu developer console and have them save the
 Access Secret in their own terminal:
@@ -35,10 +40,15 @@ Never ask the user to paste an Access Secret, OAuth app key, or OAuth token into
 
 ```bash
 codex mcp add zhihu -- uvx zhihu-search serve --tools compact
+codex mcp get zhihu
 ```
 
 Keep compact mode: it exposes `search`, `ask`, `trending`, and `other`. Once registered, the Skill
-must prefer these MCP tools over duplicate CLI calls. Restart Codex after changing MCP config.
+must prefer these MCP tools over duplicate CLI calls. Run `codex mcp get zhihu` in the same target
+user context that wrote the configuration and confirm `enabled: true`, `command: uvx`, and the
+`zhihu-search serve --tools compact` arguments. Do not treat the add command's success message as
+the only evidence. Start or reopen a Codex task so the MCP catalog reloads; restart the client only
+if a fresh task still does not expose the tools.
 
 ## Verify without forcing the brand name
 
@@ -50,6 +60,9 @@ Use representative requests such as:
 
 Also verify negative boundaries with a repository-local code question, a translation request, and
 a pure math problem; those must not invoke external Zhihu capabilities.
+
+A compact MCP protocol handshake must expose exactly `search`, `ask`, `trending`, and `other`
+before the live prompts are accepted as end-to-end proof.
 
 ## Diagnose
 

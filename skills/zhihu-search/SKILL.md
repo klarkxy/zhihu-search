@@ -51,6 +51,10 @@ Check credentials before any fallback operation except `oauth-url` and `oauth-to
 uvx zhihu-search --check-token
 ```
 
+This command must report only whether credentials are configured and their source. Never echo a
+secret fragment or a user-specific credentials path into chat or logs. Use `--probe` only when an
+end-to-end upstream check is necessary because it performs one real request.
+
 Then run the narrowest command:
 
 ```bash

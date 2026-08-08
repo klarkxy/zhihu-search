@@ -17,7 +17,12 @@ npx skills add klarkxy/zhihu-search --skill zhihu-search -g -a codex -y
 
 ```bash
 codex mcp add zhihu -- uvx zhihu-search serve --tools compact
+codex mcp get zhihu
 ```
+
+`codex mcp get zhihu` 应显示 `enabled: true`、`command: uvx`，且参数包含
+`zhihu-search serve --tools compact`。请在写入配置的同一目标用户上下文中
+执行验证，不要只以 `Added global MCP server` 的提示作为安装完成证据。
 
 也可以手动在 `~/.codex/config.toml` 中加入：
 
@@ -36,11 +41,13 @@ MCP 不可用时才回退 `uvx`。
 
 ## 重启
 
-关闭并重新打开 Codex。
+新建或重新打开 Codex 任务，让 MCP 工具目录重新加载。新任务仍未出现工具时，
+再关闭并重新打开 Codex 客户端；当前任务不会热更新刚注册的 MCP 工具。
 
 ## 验证
 
-发送：
+`compact` 模式的 MCP 握手应只暴露 `search`、`ask`、`trending`、`other`
+四个工具。然后发送：
 
 > 帮我查一下最近主流的 RAG 评测方法，返回 3 条结果并附来源链接。
 

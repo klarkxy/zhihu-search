@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from zhihu_search import cli
 from zhihu_search.commands import CommandResult
+from zhihu_search.credentials import Credentials
 
 
 def test_parser_accepts_user_contents_contract() -> None:
@@ -61,6 +63,29 @@ def test_serve_reports_invalid_tool_selection(capsys) -> None:
 
     assert exit_code == 2
     assert "MCP 工具配置错误" in capsys.readouterr().err
+
+
+def test_check_token_never_prints_secret_or_credentials_path(
+    tmp_path: Path, capsys
+) -> None:
+    secret = "zh-super-secret-value"
+    credentials_path = tmp_path / "credentials.json"
+    creds = Credentials(
+        access_secret=secret,
+        source="file",
+        path=credentials_path,
+    )
+
+    with patch.object(cli.credentials, "load", return_value=creds):
+        exit_code = cli.main(["--check-token"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert output == "OK  Access Secret 已配置（来源：file）\n"
+    assert secret not in output
+    assert secret[:4] not in output
+    assert secret[-2:] not in output
+    assert str(credentials_path) not in output
 
 
 def test_parser_requires_one_favlist_identifier() -> None:

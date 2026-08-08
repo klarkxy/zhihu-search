@@ -96,6 +96,9 @@ uvx zhihu-search --quota
 uvx zhihu-search --clear-token
 ```
 
+`--check-token` 只报告是否已配置及凭证来源，不输出 Secret 片段或本机凭证
+路径。`--probe` 会真实调用一次 `hot_list(limit=1)` 并消耗一次请求额度。
+
 | 症状 | 处理 |
 |---|---|
 | 找不到 `uvx` | 安装 uv，并重新打开终端 |

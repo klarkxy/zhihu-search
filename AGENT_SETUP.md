@@ -20,6 +20,7 @@
 
 ```bash
 uvx --version
+uvx zhihu-search --version
 uvx zhihu-search --check-token
 ```
 
@@ -32,8 +33,9 @@ uvx zhihu-search --save-token "<Access Secret>"
 uvx zhihu-search --probe
 ```
 
-`--check-token` 只证明凭证可读取；必须以 `--probe` 的真实上游响应作为
-连通性判断。
+`--check-token` 只证明凭证可读取，并且只输出配置状态和来源，不输出 Secret
+片段或凭证文件路径。必须以 `--probe` 的真实上游响应作为连通性判断；该命令
+会调用一次 `hot_list(limit=1)` 并消耗一次请求额度。
 
 ## 2. 优先安装 Skill
 
@@ -97,7 +99,12 @@ args:    zhihu-search serve --tools compact
 1. 保留所有已有 MCP server，只新增或更新 `zhihu`。
 2. 不写入任何知乎凭证。
 3. 写前、写后都解析 JSON 或 TOML。
-4. 让用户重启客户端，再用未点名知乎的资料查询验证一次真实 `search`。
+4. 在写入配置的同一目标用户上下文中运行 `codex mcp get zhihu`，确认
+   `enabled: true`、`command: uvx`，且参数包含
+   `zhihu-search serve --tools compact`；不要只把 `Added global MCP server`
+   的提示当作成功证据。
+5. 让用户新建或重新打开 Codex 任务；新任务仍未出现工具时再重启客户端。
+6. 用未点名知乎的资料查询验证一次真实 `search`。
 
 compact 启动时应看到 4 个工具；full 启动时应看到 13 个。不要擅自结束
 用户的客户端进程。

@@ -88,3 +88,16 @@ def test_openai_interface_matches_skill_behavior() -> None:
     assert "$zhihu-search" in default_prompt
     assert "MCP" in default_prompt
     assert metadata["policy"]["allow_implicit_invocation"] is True
+
+
+def test_setup_reference_has_safe_codex_mcp_verification() -> None:
+    setup = (SKILL_DIR / "references" / "setup.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "codex mcp add zhihu -- uvx zhihu-search serve --tools compact" in setup
+    assert "codex mcp get zhihu" in setup
+    assert "enabled: true" in setup
+    assert "search`, `ask`, `trending`, and `other" in setup
+    assert "must not print a secret fragment" in setup
+    assert "performs one real `hot_list(limit=1)` request" in setup

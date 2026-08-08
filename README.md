@@ -72,6 +72,17 @@ uvx zhihu-search <command> --help
 
 MCP 默认使用 `compact`，只暴露三个常用工具和一个按需入口：
 
+Codex 可以直接全局注册：
+
+```bash
+codex mcp add zhihu -- uvx zhihu-search serve --tools compact
+codex mcp get zhihu
+```
+
+第二条命令应显示 `enabled: true`、`command: uvx`，且参数包含
+`zhihu-search serve --tools compact`。注册成功后新建或重新打开 Codex
+任务；新任务仍未出现工具时再重启客户端。
+
 ```text
 command: uvx
 args:    zhihu-search serve --tools compact
@@ -170,6 +181,9 @@ uvx zhihu-search --probe
 uvx zhihu-search --quota
 uvx zhihu-search --clear-token
 ```
+
+`--check-token` 只报告是否已配置及凭证来源，不输出 Secret 片段或本机凭证
+路径；`--probe` 会真实调用一次 `hot_list(limit=1)` 并消耗一次请求额度。
 
 常见问题：
 
