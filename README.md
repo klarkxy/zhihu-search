@@ -17,11 +17,25 @@
 安装 Skill：
 
 ```bash
+uvx zhihu-search install-skill
+```
+
+该命令调用官方 `npx skills`，默认把 Skill 全局安装给 Codex。skills CLI
+会以 `~/.agents/skills` 作为统一来源，并为目标 Agent 建立所需入口。只有明确
+需要项目隔离时才使用 `uvx zhihu-search install-skill --project`，安装到当前
+项目的 `.agents/skills`。也可重复传入 `--agent`，例如：
+
+```bash
+uvx zhihu-search install-skill --agent codex --agent claude-code
+```
+
+需要直接调用底层命令时，等价命令为：
+
+```bash
 npx skills add klarkxy/zhihu-search --skill zhihu-search -g -a codex -y
 ```
 
-`-g` 会让 Codex 在所有仓库中发现该 Skill；只有明确需要项目隔离时才去掉
-`-g`。具体范围规则见 [skills CLI 安装范围](https://github.com/vercel-labs/skills#installation-scope)。
+具体范围规则见 [skills CLI 安装范围](https://github.com/vercel-labs/skills#installation-scope)。
 Skill 在已注册 `zhihu` MCP 时优先调用 `search`、`ask`、`trending`，
 MCP 不可用时才回退 `uvx zhihu-search`。因此本机还需安装
 [uv](https://docs.astral.sh/uv/getting-started/installation/)。`uvx` 会按需

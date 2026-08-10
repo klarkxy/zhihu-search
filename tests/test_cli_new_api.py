@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -44,6 +45,94 @@ def test_parser_accepts_mcp_tool_profile() -> None:
     args = cli._build_parser().parse_args(["serve", "--tools", "search,other"])
     assert args.command == "serve"
     assert args.tools == "search,other"
+
+
+def test_install_skill_defaults_to_global_codex(capsys) -> None:
+    with (
+        patch.object(cli.shutil, "which", return_value="npx.cmd"),
+        patch.object(
+            cli.subprocess,
+            "run",
+            return_value=CompletedProcess([], 0),
+        ) as run,
+    ):
+        exit_code = cli.main(["install-skill"])
+
+    assert exit_code == 0
+    run.assert_called_once_with(
+        [
+            "npx.cmd",
+            "--yes",
+            "skills",
+            "add",
+            "klarkxy/zhihu-search",
+            "--skill",
+            "zhihu-search",
+            "--global",
+            "--agent",
+            "codex",
+            "--yes",
+        ],
+        check=False,
+    )
+    assert "Skill 已安装" in capsys.readouterr().out
+
+
+def test_install_skill_supports_project_multiple_agents_and_copy() -> None:
+    with (
+        patch.object(cli.shutil, "which", return_value="/usr/bin/npx"),
+        patch.object(
+            cli.subprocess,
+            "run",
+            return_value=CompletedProcess([], 0),
+        ) as run,
+    ):
+        exit_code = cli.main(
+            [
+                "install-skill",
+                "--project",
+                "--agent",
+                "codex",
+                "--agent",
+                "claude-code",
+                "--copy",
+            ]
+        )
+
+    assert exit_code == 0
+    command = run.call_args.args[0]
+    assert "--global" not in command
+    assert command[-6:] == [
+        "--agent",
+        "codex",
+        "--agent",
+        "claude-code",
+        "--copy",
+        "--yes",
+    ]
+
+
+def test_install_skill_reports_missing_npx(capsys) -> None:
+    with patch.object(cli.shutil, "which", return_value=None):
+        exit_code = cli.main(["install-skill"])
+
+    assert exit_code == 1
+    assert "找不到 npx" in capsys.readouterr().err
+
+
+def test_install_skill_normalizes_npx_failure_code(capsys) -> None:
+    with (
+        patch.object(cli.shutil, "which", return_value="npx"),
+        patch.object(
+            cli.subprocess,
+            "run",
+            return_value=CompletedProcess([], 7),
+        ),
+    ):
+        exit_code = cli.main(["install-skill"])
+
+    assert exit_code == 2
+    assert "退出码 7" in capsys.readouterr().err
 
 
 def test_serve_passes_tool_selection_to_server() -> None:

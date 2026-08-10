@@ -5,10 +5,11 @@
 ## 全局安装 Skill
 
 ```bash
-npx skills add klarkxy/zhihu-search --skill zhihu-search -g -a codex -y
+uvx zhihu-search install-skill
 ```
 
-`-g` 让 Skill 在所有仓库中可用。只有明确需要项目隔离时才去掉 `-g`。
+该命令内部调用 `npx skills`，并以 `~/.agents/skills` 为统一来源，让 Skill
+在所有仓库中可用。只有明确需要项目隔离时才加 `--project`。
 安装后重新打开 Codex 任务，让 Skill 目录重新加载。
 
 ## 配置 MCP

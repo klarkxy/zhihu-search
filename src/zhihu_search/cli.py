@@ -8,6 +8,7 @@ Flags:
     --quota, --reset-quota, --probe
 
 Commands (默认: serve):
+    install-skill      通过 npx skills 安装 Agent Skill
     serve              启动可配置工具目录的 stdio MCP 服务器
     openwebui          启动 OpenAPI 工具服务器
     search <query>     搜索知乎内容
@@ -26,6 +27,8 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
+import subprocess
 import sys
 
 from . import __version__, commands, credentials, formatters
@@ -84,7 +87,36 @@ def _build_parser() -> argparse.ArgumentParser:
     # 子命令
     sub = p.add_subparsers(
         dest="command",
-        metavar="{search,ask,trending,user-*,pdf-*,ppt-*,oauth-*,serve,openwebui}",
+        metavar=(
+            "{install-skill,search,ask,trending,user-*,pdf-*,ppt-*,"
+            "oauth-*,serve,openwebui}"
+        ),
+    )
+
+    # --- Skill 安装 ---
+    install_skill = sub.add_parser(
+        "install-skill",
+        help="通过 npx skills 安装 zhihu-search Agent Skill。",
+    )
+    install_skill.add_argument(
+        "--agent",
+        action="append",
+        default=None,
+        metavar="NAME",
+        help=(
+            "目标 Agent，可重复指定；默认 codex。"
+            "例如：--agent codex --agent claude-code。"
+        ),
+    )
+    install_skill.add_argument(
+        "--project",
+        action="store_true",
+        help="安装到当前项目；默认安装到用户级全局目录。",
+    )
+    install_skill.add_argument(
+        "--copy",
+        action="store_true",
+        help="复制 Skill 文件，不使用 skills CLI 的默认链接方式。",
     )
 
     # --- serve（显式入口）---
@@ -582,6 +614,53 @@ async def _run_oauth_token(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_install_skill(args: argparse.Namespace) -> int:
+    """通过官方 skills CLI 安装仓库内发布的 Skill。"""
+    npx = shutil.which("npx")
+    if not npx:
+        print(
+            "FAIL  找不到 npx；请先安装 Node.js，再重新运行此命令。",
+            file=sys.stderr,
+        )
+        return 1
+
+    command = [
+        npx,
+        "--yes",
+        "skills",
+        "add",
+        "klarkxy/zhihu-search",
+        "--skill",
+        "zhihu-search",
+    ]
+    if not args.project:
+        command.append("--global")
+    for agent in args.agent or ["codex"]:
+        command.extend(["--agent", agent])
+    if args.copy:
+        command.append("--copy")
+    command.append("--yes")
+
+    scope = "当前项目的 .agents/skills" if args.project else "用户级 Skill 目录"
+    print(f"正在把 zhihu-search Skill 安装到{scope}……")
+    try:
+        completed = subprocess.run(command, check=False)
+    except OSError as exc:
+        print(f"FAIL  无法启动 npx skills：{exc}", file=sys.stderr)
+        return 2
+    if completed.returncode != 0:
+        print(
+            f"FAIL  npx skills 安装失败（退出码 {completed.returncode}）。",
+            file=sys.stderr,
+        )
+        # Windows 批处理可能把 npm 的负退出状态表现为超大无符号整数；
+        # 对外保持本 CLI 的稳定错误码，同时保留上面的原始状态用于诊断。
+        return 2
+
+    print("OK  Skill 已安装；请重新打开 Agent 任务以加载它。")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # 主入口
 # ---------------------------------------------------------------------------
@@ -646,6 +725,9 @@ def main(argv: list[str] | None = None) -> int:
 
         openwebui_main(host=args.host, port=args.port, api_key=args.api_key)
         return 0
+
+    if args.command == "install-skill":
+        return _run_install_skill(args)
 
     try:
         if args.command == "oauth-url":

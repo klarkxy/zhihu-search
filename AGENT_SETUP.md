@@ -40,11 +40,17 @@ uvx zhihu-search --probe
 ## 2. 优先安装 Skill
 
 ```bash
-npx skills add klarkxy/zhihu-search --skill zhihu-search -g -a codex -y
+uvx zhihu-search install-skill
 ```
 
-这是 Codex 的跨仓库默认。其他客户端应把 `codex` 替换为对应 agent；只有
-用户明确要求项目隔离时才去掉 `-g`。
+这是 Codex 的跨仓库默认，内部调用 `npx skills`，以
+`~/.agents/skills` 为统一来源。其他客户端使用
+`--agent <名称>`；只有用户明确要求项目隔离时才加 `--project`。底层等价
+命令是：
+
+```bash
+npx skills add klarkxy/zhihu-search --skill zhihu-search -g -a codex -y
+```
 
 让目标 Agent 重新加载 Skill，然后真实执行一次查询：
 

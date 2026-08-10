@@ -8,11 +8,13 @@ MCP-first route is unavailable.
 For Codex across repositories, install globally:
 
 ```bash
-npx skills add klarkxy/zhihu-search --skill zhihu-search -g -a codex -y
+uvx zhihu-search install-skill
 ```
 
-Omit `-g` only when the user explicitly wants an isolated project-level installation. Start a new
-Codex task after installation so the Skill catalog reloads.
+This calls `npx skills` and installs globally for Codex by default, using `~/.agents/skills` as
+the canonical store. Add `--project` only when the user explicitly wants project-local
+`.agents/skills` isolation, or repeat `--agent <name>` to target other Agents. Start a new Codex
+task after installation so the Skill catalog reloads.
 
 ## Prepare uvx and credentials
 

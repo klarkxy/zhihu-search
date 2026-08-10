@@ -34,10 +34,12 @@ uvx zhihu-search --probe
 ## 1. 安装 Skill（推荐）
 
 ```bash
-npx skills add klarkxy/zhihu-search --skill zhihu-search -g -a codex -y
+uvx zhihu-search install-skill
 ```
 
-`-g` 是跨仓库默认；只有用户明确需要隔离时才去掉 `-g`，安装到当前项目。
+该命令调用 `npx skills`，默认全局安装给 Codex，并以
+`~/.agents/skills` 为统一来源。只有用户明确需要隔离时才加 `--project`，
+安装到当前项目的 `.agents/skills`；其他客户端可使用 `--agent <名称>`。
 安装后重新打开 Codex 任务。Skill 会根据任务选择 `search`、`ask` 或
 `trending`；如果已经注册 `zhihu` MCP 则优先调用 MCP，否则回退对应的
 `uvx zhihu-search` 命令。
