@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "zhihu-search"
-version = "1.4.2"
+version = "1.4.3"
 description = "知乎开放平台的 Skill、CLI、MCP 与 OpenAPI 工具"
 readme = "README.md"
 requires-python = ">=3.10"
