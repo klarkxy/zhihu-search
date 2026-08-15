@@ -4,10 +4,11 @@
 
 | 顺序 | 方式 | 适合场景 |
 |---:|---|---|
-| 1 | Skill | 推荐；主动识别任务，优先 MCP、回退 CLI |
-| 2 | CLI | 临时调用或脚本 |
-| 3 | MCP | AI 客户端高频使用 |
-| 4 | OpenWebUI | 需要 HTTP 工具服务器 |
+| 1 | DSH 插件 | DeepSeek Harness profile 原生安装 |
+| 2 | Skill | 其他 Agent；主动识别任务，优先 MCP、回退 CLI |
+| 3 | CLI | 临时调用或脚本 |
+| 4 | MCP | AI 客户端高频使用 |
+| 5 | OpenWebUI | 需要 HTTP 工具服务器 |
 
 ## 通用准备
 
@@ -31,7 +32,18 @@ uvx zhihu-search --probe
 不要把 Access Secret、OAuth `app_key` 或 OAuth token 发到聊天中，也不要
 写进配置、截图或仓库。
 
-## 1. 安装 Skill（推荐）
+## 1. 安装 DSH 插件
+
+DeepSeek Harness 用户直接把 bundle 安装进目标 profile：
+
+```bash
+dsh plugin --profile web add "github:klarkxy/zhihu-search"
+```
+
+插件不保存密钥，只通过 DSH 自带的 MCP client 启动固定版本的 Python
+服务。完整安装、验证与移除步骤见 [dsh.md](dsh.md)。
+
+## 2. 安装 Skill（推荐）
 
 ```bash
 uvx zhihu-search install-skill
@@ -44,7 +56,7 @@ uvx zhihu-search install-skill
 `trending`；如果已经注册 `zhihu` MCP 则优先调用 MCP，否则回退对应的
 `uvx zhihu-search` 命令。
 
-## 2. 直接使用 CLI
+## 3. 直接使用 CLI
 
 ```bash
 uvx zhihu-search search "RAG 评测方法" --count 5
@@ -54,7 +66,7 @@ uvx zhihu-search --help
 在仓库目录验证尚未发布的代码时，使用
 `uvx --from . zhihu-search <command>`。
 
-## 3. 配置 MCP（高频使用）
+## 4. 配置 MCP（高频使用）
 
 推荐显式启用 compact 模式：
 
@@ -76,11 +88,12 @@ compact 只暴露 `search`、`ask`、`trending` 和 `other`。`other` 可在当�
 | Codex | [codex.md](codex.md) |
 | OpenCode | [opencode.md](opencode.md) |
 | HanaAgent / OpenHanako | [hanako-agent.md](hanako-agent.md) |
+| DeepSeek Harness | [dsh.md](dsh.md) |
 
 MCP 会读取本机保存的凭证，不需要在客户端配置中添加密钥。
 注册后，Skill 会优先使用 MCP 的三个核心工具。
 
-## 4. OpenWebUI（少数场景）
+## 5. OpenWebUI（少数场景）
 
 需要 HTTP OpenAPI 工具服务器时运行：
 

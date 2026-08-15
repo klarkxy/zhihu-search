@@ -1,0 +1,23 @@
+# DSH ships @deepseek-ai/dsh-mcp-client. This bundle only selects the trusted
+# executable and keeps all Zhihu business logic in the versioned Python package.
+- insert:
+    - id: zhihu-search-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: zhihu
+        transport: stdio
+        command: uvx
+        args:
+          - --from
+          - 'zhihu-search==1.4.2'
+          - zhihu-search
+          - serve
+          - --tools
+          - compact
+        toolCallTimeoutMs: 180000
+        failOnStartupError: true
+        reconnect:
+          enabled: true
+          initialDelayMs: 500
+          maxDelayMs: 30000
+          maxAttempts: 10

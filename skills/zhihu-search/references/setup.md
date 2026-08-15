@@ -66,6 +66,23 @@ a pure math problem; those must not invoke external Zhihu capabilities.
 A compact MCP protocol handshake must expose exactly `search`, `ask`, `trending`, and `other`
 before the live prompts are accepted as end-to-end proof.
 
+## Install the DeepSeek Harness bundle
+
+For DSH, use the native profile bundle instead of editing a generic MCP config or invoking a
+Python-side installer:
+
+```bash
+dsh plugin --profile web add "github:klarkxy/zhihu-search"
+dsh --profile web --dump-config
+```
+
+The composed config must contain one `zhihu-search-mcp` row backed by
+`@deepseek-ai/dsh-mcp-client`, a pinned `zhihu-search` package, and `serve --tools compact`.
+Restart the target profile after a persistent install. DSH exposes the initial tools as
+`mcp__zhihu__search`, `mcp__zhihu__ask`, `mcp__zhihu__trending`, and
+`mcp__zhihu__other`. Keep credentials in the existing per-user Python credential file; never
+add an Access Secret to the bundle, profile patch, or chat.
+
 ## Diagnose
 
 ```bash

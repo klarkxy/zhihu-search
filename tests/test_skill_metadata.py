@@ -101,3 +101,19 @@ def test_setup_reference_has_safe_codex_mcp_verification() -> None:
     assert "search`, `ask`, `trending`, and `other" in setup
     assert "must not print a secret fragment" in setup
     assert "performs one real `hot_list(limit=1)` request" in setup
+
+
+def test_setup_reference_has_native_dsh_bundle_installation() -> None:
+    setup = (SKILL_DIR / "references" / "setup.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert (
+        'dsh plugin --profile web add '
+        '"github:klarkxy/zhihu-search"'
+        in setup
+    )
+    assert "dsh --profile web --dump-config" in setup
+    assert "@deepseek-ai/dsh-mcp-client" in setup
+    assert "mcp__zhihu__search" in setup
+    assert "never\nadd an Access Secret" in setup

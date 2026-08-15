@@ -1,0 +1,32 @@
+{
+  "name": "dsh-plugin-zhihu-search",
+  "version": "1.4.2",
+  "description": "GitHub-installable DeepSeek Harness bundle for the zhihu-search MCP server",
+  "type": "module",
+  "files": [
+    "dsh-plugin/cordis.patch.yml",
+    "dsh-plugin/README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "mcp",
+    "zhihu"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klarkxy/zhihu-search.git"
+  },
+  "homepage": "https://github.com/klarkxy/zhihu-search#readme",
+  "bugs": "https://github.com/klarkxy/zhihu-search/issues",
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./dsh-plugin/cordis.patch.yml"
+    }
+  }
+}

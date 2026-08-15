@@ -7,12 +7,28 @@
 
 | 顺序 | 方式 | 适合场景 |
 |---:|---|---|
-| 1 | **Skill** | 推荐；让 Agent 主动识别任务，优先 MCP、回退 CLI |
-| 2 | **CLI** | 临时查询、脚本和调试 |
-| 3 | **MCP** | 在 AI 客户端中高频、持续调用 |
-| 4 | **OpenWebUI** | 少数需要 HTTP 工具服务器的场景 |
+| 1 | **DSH 插件** | DeepSeek Harness 用户；安装一个 profile bundle |
+| 2 | **Skill** | 其他 Agent；主动识别任务，优先 MCP、回退 CLI |
+| 3 | **CLI** | 临时查询、脚本和调试 |
+| 4 | **MCP** | 在 AI 客户端中高频、持续调用 |
+| 5 | **OpenWebUI** | 少数需要 HTTP 工具服务器的场景 |
 
-## 1. Skill（推荐）
+## 1. DeepSeek Harness 插件
+
+DSH 用户直接安装声明式 bundle；Python CLI 不负责修改 DSH 配置：
+
+```bash
+dsh plugin --profile web add "github:klarkxy/zhihu-search"
+```
+
+插件使用 DSH 自带的 MCP client，通过 `uvx` 启动与插件版本一致的
+`zhihu-search`，默认注册 `mcp__zhihu__search`、`mcp__zhihu__ask`、
+`mcp__zhihu__trending` 和 `mcp__zhihu__other` 四个 compact 工具。
+Access Secret 仍由 Python 的用户级凭证文件
+读取，不进入 DSH 配置。安装、验证、更新和移除见
+[DSH 指南](setup/dsh.md)。
+
+## 2. Skill（推荐）
 
 安装 Skill：
 
@@ -52,7 +68,7 @@ Access Secret 在
 [知乎开放平台个人中心](https://developer.zhihu.com/personal)创建。不要把它
 发到聊天、截图或仓库。
 
-## 2. CLI
+## 3. CLI
 
 不需要 Agent 时，直接用 `uvx`：
 
@@ -82,7 +98,7 @@ uvx zhihu-search <command> --help
 在仓库目录验证尚未发布的代码时，把命令开头改为
 `uvx --from . zhihu-search`。
 
-## 3. MCP（高频使用）
+## 4. MCP（高频使用）
 
 MCP 默认使用 `compact`，只暴露三个常用工具和一个按需入口：
 
@@ -150,7 +166,7 @@ uvx zhihu-search serve --tools full
 PDF 本机上传和 OAuth token 交换仍只允许 CLI/Python 执行，不会成为模型
 可调用的工具。
 
-## 4. OpenWebUI（少数场景）
+## 5. OpenWebUI（少数场景）
 
 只有需要 HTTP OpenAPI 工具服务器时才使用：
 

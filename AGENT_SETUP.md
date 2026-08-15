@@ -60,6 +60,21 @@ Skill 能在未点名知乎时被发现、查询成功且返回链接，即完�
 单次任务继续安装 MCP；如果 MCP 已存在，确认 Skill 使用 MCP 而不是重复运行
 CLI。
 
+## DeepSeek Harness 使用原生插件
+
+目标客户端是 DSH 时，不修改 Python CLI，也不手写 profile patch；安装正式
+bundle：
+
+```bash
+dsh plugin --profile web add "github:klarkxy/zhihu-search"
+dsh --profile web --dump-config
+```
+
+配置 dump 必须包含 `zhihu-search-mcp`、`@deepseek-ai/dsh-mcp-client`、
+固定版本的 `zhihu-search` 和 `serve --tools compact`。持久安装后停止并重启
+目标 profile，再确认四个 `mcp__zhihu__...` 工具各出现一次并完成真实查询。
+插件配置中不得写入任何知乎凭证。完整流程见 [setup/dsh.md](setup/dsh.md)。
+
 ## 3. CLI 作为直接入口
 
 不支持 Skill，或用户需要脚本调用时，直接使用：
