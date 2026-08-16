@@ -1,7 +1,7 @@
 # zhihu-search
 
-用一个命令调用知乎开放平台：搜索、直答、热榜、用户公开数据、PDF
-解析、PPT 生成和 OAuth 辅助流程。
+用一个命令调用知乎开放平台：搜索、直答、热榜、用户公开数据、知识库、
+PDF 解析、PPT 生成和 OAuth 辅助流程。
 
 推荐按下面的顺序选择入口：
 
@@ -78,10 +78,12 @@ uvx zhihu-search ask "什么是 ReAct Agent？" --model thinking
 uvx zhihu-search trending --limit 10
 ```
 
-用户数据、PDF、PPT 和 OAuth 也都可以从 CLI 调用：
+用户数据、知识库、PDF、PPT 和 OAuth 也都可以从 CLI 调用：
 
 ```bash
 uvx zhihu-search user-contents --content-type article --limit 10
+uvx zhihu-search knowledge-bases --scope all
+uvx zhihu-search knowledge-search "退款规则" --recall-scope personal
 uvx zhihu-search pdf-upload "./report.pdf"
 uvx zhihu-search pdf-create "file_..."
 uvx zhihu-search ppt-create "https://zhuanlan.zhihu.com/p/123" --pages 12
@@ -118,26 +120,33 @@ command: uvx
 args:    zhihu-search serve --tools compact
 ```
 
-| 配置 | 暴露内容 |
+| 档位 | 暴露内容 |
 |---|---|
 | `compact`（默认） | `search`、`ask`、`trending`、`other` |
-| `full` | 全部 13 个工具 |
-| 逗号 allowlist | 严格只允许指定工具，例如 `search,ask,pdf_status` |
+| `knowledge` | compact 加 3 个知识库工具 |
+| `user` | compact 加 5 个用户数据工具 |
+| `office` | compact 加 2 个 PDF 和 2 个 PPT 工具 |
+| `full` | 全部 16 个工具 |
+
+档位和工具名可以逗号混写，结果取并集，例如 `knowledge,user` 或
+`compact,knowledge_search`。只写工具名则是严格 allowlist，例如
+`search,ask,pdf_status`。
 
 `other` 管理当前 MCP 会话中的低频工具：
 
-- `enable`：展开 5 个用户数据工具、2 个 PDF 工具和 2 个 PPT 工具。
-- `disable`：收起这 9 个工具。
+- `enable`：展开 5 个用户数据工具、3 个知识库工具、2 个 PDF 工具和 2 个 PPT 工具。
+- `disable`：收起这 12 个工具。
 - `reset`：恢复启动时的工具集合。
 
-在 `compact` 和 `full` 下，`other` 可管理全部 9 个低频工具；自定义
+只要选择里出现档位名，`other` 就能管理全部 12 个低频工具；纯工具名的严格
 allowlist 下，它只能管理列表里已经允许的低频工具，不能越过开关。
 
 也可以用 `ZHIHU_MCP_TOOLS` 设置默认配置；命令行 `--tools` 优先于环境
-变量。需要全部显式工具时运行：
+变量。常用写法：
 
 ```bash
-uvx zhihu-search serve --tools full
+uvx zhihu-search serve --tools knowledge   # 自建知识库检索常驻可见
+uvx zhihu-search serve --tools full        # 一次暴露全部显式工具
 ```
 
 通用 JSON 配置：
@@ -163,8 +172,8 @@ uvx zhihu-search serve --tools full
 - [OpenCode](setup/opencode.md)
 - [HanaAgent](setup/hanako-agent.md)
 
-PDF 本机上传和 OAuth token 交换仍只允许 CLI/Python 执行，不会成为模型
-可调用的工具。
+PDF / 知识库本机上传和 OAuth token 交换仍只允许 CLI/Python 执行，不会
+成为模型可调用的工具。
 
 ## 5. OpenWebUI（少数场景）
 
@@ -191,6 +200,7 @@ uvx zhihu-search openwebui \
 |---|---:|---|
 | 搜索、直答、热榜 | 4 | 知乎搜索、全网搜索、直答、热榜 |
 | 用户公开数据 | 5 | 创作、关注、近期收藏和收藏夹 |
+| 知识库 | 4 | 列表、内容、上传、检索 |
 | PDF 解析 | 3 | 上传、创建任务、查询状态 |
 | PPT 生成 | 2 | 创建任务、查询状态 |
 | OAuth 辅助 | 2 | 授权 URL、授权码换 token |
@@ -224,6 +234,7 @@ uvx zhihu-search --clear-token
 | `Code=30002` | 到知乎开发者后台检查额度或接口权限 |
 | MCP 工具未出现 | 检查配置后重启客户端 |
 | PDF/PPT 长时间处理中 | 稍后再查状态，不要紧密轮询 |
+| 知识库列表为空 | 先登录 [直答知识库](https://zhida.zhihu.com/repositories/square) 完成初始化 |
 
 Agent 代为安装和验证时，参见 [AGENT_SETUP.md](AGENT_SETUP.md)。
 

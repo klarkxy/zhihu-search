@@ -13,7 +13,7 @@
 - Access Secret 只保存在本机凭证文件或进程环境中。
 - `ZHIHU_OAUTH_TOKEN` 只放在服务端；模型只接收
   `use_configured_oauth_user` 布尔开关。
-- `pdf-upload`、`oauth-url` 和 `oauth-token` 只允许从 CLI/Python 调用。
+- `pdf-upload`、`knowledge-upload`、`oauth-url` 和 `oauth-token` 只允许从 CLI/Python 调用。
 - MCP 不接收本机文件路径、OAuth `app_key` 或 OAuth token。
 
 ## 1. 准备 uvx 和凭证
@@ -107,11 +107,15 @@ args:    zhihu-search serve --tools compact
 | 工具配置 | 行为 |
 |---|---|
 | `compact` | 暴露 `search`、`ask`、`trending`、`other` |
-| `full` | 暴露全部 13 个工具 |
-| 逗号 allowlist | 严格只允许指定工具 |
+| `knowledge` | compact 加 3 个知识库工具 |
+| `user` | compact 加 5 个用户数据工具 |
+| `office` | compact 加 2 个 PDF 和 2 个 PPT 工具 |
+| `full` | 暴露全部 16 个工具 |
+| 逗号混写 | 档位名与工具名取并集，如 `knowledge,user` |
+| 纯工具名 allowlist | 严格只允许指定工具 |
 
 `other` 的 `enable`、`disable`、`reset` 只改变当前 MCP 会话，可展开、收起
-或复原低频显式工具。compact/full 可管理全部 9 个；自定义 allowlist
+或复原低频显式工具。选择里含档位名时可管理全部 12 个；纯工具名 allowlist
 只能管理其中已允许的工具，不能越过启动开关。`ZHIHU_MCP_TOOLS`
 可设置默认值，但命令行 `--tools` 优先。
 
@@ -127,8 +131,8 @@ args:    zhihu-search serve --tools compact
 5. 让用户新建或重新打开 Codex 任务；新任务仍未出现工具时再重启客户端。
 6. 用未点名知乎的资料查询验证一次真实 `search`。
 
-compact 启动时应看到 4 个工具；full 启动时应看到 13 个。不要擅自结束
-用户的客户端进程。
+compact 启动时应看到 4 个工具；knowledge 7 个，office 8 个，user 9 个，
+full 16 个。不要擅自结束用户的客户端进程。
 
 ## 5. 最后才考虑 OpenWebUI
 

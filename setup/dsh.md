@@ -77,9 +77,14 @@ Completion requires a real DSH tool call, a successful matching tool result,
 and a non-empty task answer containing useful links. A successful package
 install or config dump alone is not end-to-end proof.
 
-In compact mode, `other(action="enable")` should reveal nine additional
-low-frequency tools. DSH's MCP client owns subprocess shutdown and bounded
-reconnection; recovered tools must not be duplicated.
+In compact mode, `other(action="enable")` should reveal twelve additional
+low-frequency tools: five user-data tools, three knowledge-base tools, and
+four PDF/PPT tools. The published bundle stays on compact so the initial
+catalog remains four tools. To keep a capability group always visible,
+change the composed `--tools` argument to `knowledge`, `user`, `office`,
+or `full`; profile names and tool names may be mixed. DSH's MCP client
+owns subprocess shutdown and bounded reconnection; recovered tools must
+not be duplicated.
 
 ## Update and remove
 

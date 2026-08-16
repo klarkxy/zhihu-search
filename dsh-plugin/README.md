@@ -30,8 +30,11 @@ catalog contains:
 - `mcp__zhihu__trending`
 - `mcp__zhihu__other`
 
-`other(action="enable")` reveals the nine lower-frequency user-data, PDF,
-and PPT tools for that MCP session.
+`other(action="enable")` reveals the twelve lower-frequency user-data,
+knowledge-base, PDF, and PPT tools for that MCP session. The published
+bundle stays on compact. To keep a capability group always visible, change
+the composed `--tools` argument to `knowledge`, `user`, `office`, or
+`full`; profile names and tool names may be mixed.
 
 For a local checkout smoke test:
 
@@ -63,5 +66,5 @@ delete that credential too.
   file created by `zhihu-search --save-token`.
 - DSH treats the configured stdio command as trusted host code outside the
   agent sandbox. Review and pin bundle releases before installation.
-- Local PDF upload and OAuth token exchange remain CLI/Python-only and are
-  not exposed as model-callable tools.
+- Local PDF / knowledge-base upload and OAuth token exchange remain
+  CLI/Python-only and are not exposed as model-callable tools.

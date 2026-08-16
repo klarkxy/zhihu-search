@@ -110,11 +110,15 @@ def format_content_items(
         likes = _pick(item, "LikeCount", "like_count", "VoteUpCount")
         comments = _pick(item, "CommentCount", "comment_count")
         favorites = _pick(item, "FavoriteCount", "favorite_count")
+        author = _pick(item, "Author", "author")
 
         lines.append(f"### {idx}. {title}")
         lines.append(f"- 类型：{content_type}")
         if url:
             lines.append(f"- 链接：{url}")
+        author_text = _format_author(author)
+        if author_text:
+            lines.append(f"- 作者：{author_text}")
 
         times: list[str] = []
         created_text = _format_time(created_at)
@@ -227,6 +231,174 @@ def format_favlists(data: dict | None) -> str:
             lines.append(f"- URL Token：{url_token}")
         if isinstance(description, str) and description.strip():
             lines.append(f"- 描述：{_truncate(description, 300)}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def format_knowledge_bases(data: dict | None) -> str:
+    """格式化知识库列表。"""
+    payload = _payload(data)
+    items = _item_list(payload)
+    if not items:
+        return "知识库列表为空。首次使用请先登录直答知识库完成初始化：https://zhida.zhihu.com/repositories/square"
+
+    lines: list[str] = ["## 知识库列表", ""]
+    for idx, raw_item in enumerate(items, 1):
+        item = raw_item if isinstance(raw_item, dict) else {}
+        name = _pick(item, "Name", "name") or "(未命名知识库)"
+        knowledge_base_id = _pick(
+            item, "KnowledgeBaseID", "knowledge_base_id", "KnowledgeBaseId"
+        )
+        description = _pick(item, "Description", "description")
+        relation = _pick(item, "Relation", "relation")
+        visibility = _pick(item, "Visibility", "visibility")
+        is_default = _pick(item, "IsDefault", "is_default")
+        content_count = _pick(item, "ContentCount", "content_count")
+        updated_at = _pick(item, "UpdatedAt", "updated_at")
+
+        lines.append(f"### {idx}. {name}")
+        if knowledge_base_id not in (None, ""):
+            lines.append(f"- 知识库 ID：{knowledge_base_id}")
+        details: list[str] = []
+        if relation not in (None, ""):
+            details.append(f"关系 {relation}")
+        if visibility not in (None, ""):
+            details.append(f"可见性 {visibility}")
+        if isinstance(is_default, bool):
+            details.append("默认知识库" if is_default else "非默认")
+        if content_count is not None:
+            details.append(f"内容 {content_count}")
+        if details:
+            lines.append("- 属性：" + "　|　".join(details))
+        updated_text = _format_time(updated_at)
+        if updated_text:
+            lines.append(f"- 更新：{updated_text}")
+        if isinstance(description, str) and description.strip():
+            lines.append(f"- 描述：{_truncate(description, 300)}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def format_knowledge_items(data: dict | None) -> str:
+    """格式化知识库内容列表。"""
+    payload = _payload(data)
+    items = _item_list(payload)
+    if not items:
+        return "知识库内容为空。"
+
+    lines: list[str] = ["## 知识库内容", ""]
+    for idx, raw_item in enumerate(items, 1):
+        item = raw_item if isinstance(raw_item, dict) else {}
+        title = _pick(item, "Title", "title") or "(无标题)"
+        content_type = _pick(item, "ContentType", "content_type") or "内容"
+        abstract = _pick(item, "Abstract", "abstract")
+        origin_url = _pick(item, "OriginUrl", "origin_url")
+        recall_id = _pick(
+            item, "RecallContentID", "recall_content_id", "RecallContentId"
+        )
+        created_at = _pick(item, "CreatedAt", "created_at")
+        updated_at = _pick(item, "UpdatedAt", "updated_at")
+
+        lines.append(f"### {idx}. {title}")
+        lines.append(f"- 类型：{content_type}")
+        if origin_url:
+            lines.append(f"- 来源：{origin_url}")
+        if recall_id not in (None, ""):
+            lines.append(f"- 内容 ID：{recall_id}")
+        times: list[str] = []
+        created_text = _format_time(created_at)
+        updated_text = _format_time(updated_at)
+        if created_text:
+            times.append(f"创建 {created_text}")
+        if updated_text:
+            times.append(f"更新 {updated_text}")
+        if times:
+            lines.append("- 时间：" + "　|　".join(times))
+        if isinstance(abstract, str) and abstract.strip():
+            lines.append("")
+            lines.append(_truncate(abstract, 400))
+        lines.append("")
+
+    paging = _format_cursor_paging(payload)
+    if paging:
+        lines.append(paging)
+    return "\n".join(lines).rstrip()
+
+
+def format_knowledge_upload(data: dict | None) -> str:
+    """格式化知识库文件上传结果。"""
+    payload = _payload(data)
+    if not payload:
+        return "（知识库上传无返回内容）"
+
+    knowledge_base_id = _pick(
+        payload, "KnowledgeBaseID", "knowledge_base_id", "KnowledgeBaseId"
+    )
+    recall_id = _pick(
+        payload, "RecallContentID", "recall_content_id", "RecallContentId"
+    )
+    file_name = _pick(payload, "FileName", "file_name")
+    file_size = _pick(payload, "FileSize", "file_size")
+    title = _pick(payload, "Title", "title")
+    abstract = _pick(payload, "Abstract", "abstract")
+    origin_url = _pick(payload, "OriginUrl", "origin_url")
+
+    lines: list[str] = ["## 知识库上传成功"]
+    if knowledge_base_id not in (None, ""):
+        lines.append(f"- 知识库 ID：{knowledge_base_id}")
+    if recall_id not in (None, ""):
+        lines.append(f"- 内容 ID：{recall_id}")
+    if file_name not in (None, ""):
+        lines.append(f"- 文件名：{file_name}")
+    if file_size is not None:
+        lines.append(f"- 大小：{file_size} 字节")
+    if title not in (None, ""):
+        lines.append(f"- 标题：{title}")
+    if origin_url:
+        lines.append(f"- 源文件：{origin_url}")
+    if isinstance(abstract, str) and abstract.strip():
+        lines.append(f"- 摘要：{_truncate(abstract, 400)}")
+    if len(lines) == 1:
+        lines.append("- 状态：上游未返回可识别的上传字段")
+    return "\n".join(lines)
+
+
+def format_knowledge_search(data: dict | None) -> str:
+    """格式化知识库检索结果。"""
+    payload = _payload(data)
+    items = _item_list(payload)
+    if not items:
+        return "知识库检索无匹配结果。"
+
+    lines: list[str] = ["## 知识库检索结果", ""]
+    for idx, raw_item in enumerate(items, 1):
+        item = raw_item if isinstance(raw_item, dict) else {}
+        doc_name = _pick(item, "DocName", "doc_name") or "(未命名文档)"
+        knowledge_base_id = _pick(
+            item, "KnowledgeBaseID", "knowledge_base_id", "KnowledgeBaseId"
+        )
+        recall_id = _pick(
+            item, "RecallContentID", "recall_content_id", "RecallContentId"
+        )
+        origin_url = _pick(item, "OriginUrl", "origin_url")
+        content = _pick(item, "Content", "content")
+
+        lines.append(f"### {idx}. {doc_name}")
+        if knowledge_base_id not in (None, ""):
+            lines.append(f"- 知识库 ID：{knowledge_base_id}")
+        if recall_id not in (None, ""):
+            lines.append(f"- 内容 ID：{recall_id}")
+        if origin_url:
+            lines.append(f"- 来源：{origin_url}")
+        snippets = content if isinstance(content, list) else []
+        rendered = [
+            _truncate(str(snippet).strip(), 400)
+            for snippet in snippets
+            if str(snippet).strip()
+        ]
+        if rendered:
+            lines.append("")
+            lines.extend(f"- {snippet}" for snippet in rendered)
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -401,6 +573,37 @@ def _format_paging(data: dict[str, Any]) -> str:
     return "分页：" + "；".join(parts) if parts else ""
 
 
+def _format_author(author: Any) -> str:
+    if not isinstance(author, dict):
+        return ""
+    name = _pick(author, "Name", "name") or "知乎用户"
+    url = _pick(author, "Url", "url")
+    headline = _pick(author, "Headline", "headline")
+    parts = [str(name)]
+    if url:
+        parts.append(str(url))
+    if isinstance(headline, str) and headline.strip():
+        parts.append(_truncate(headline, 80))
+    return "　|　".join(parts)
+
+
+def _format_cursor_paging(data: dict[str, Any]) -> str:
+    total = _pick(data, "Total", "total", "Totals", "totals")
+    has_more = _pick(data, "HasMore", "has_more")
+    next_cursor = _pick(data, "NextCursor", "next_cursor")
+
+    parts: list[str] = []
+    if total is not None:
+        parts.append(f"共 {total} 条")
+    if has_more is True and next_cursor not in (None, ""):
+        parts.append(f"下一页 Cursor：{next_cursor}")
+    elif has_more is False:
+        parts.append("已到最后一页")
+    elif next_cursor not in (None, ""):
+        parts.append(f"下一页 Cursor：{next_cursor}")
+    return "分页：" + "；".join(parts) if parts else ""
+
+
 def _format_favlist_reference(item: dict[str, Any]) -> str:
     title = _pick(item, "Title", "title") or "(未命名收藏夹)"
     url = _pick(item, "Url", "url")
@@ -424,6 +627,10 @@ __all__ = [
     "format_content_items",
     "format_followees",
     "format_favlists",
+    "format_knowledge_bases",
+    "format_knowledge_items",
+    "format_knowledge_upload",
+    "format_knowledge_search",
     "format_upload_result",
     "format_task_status",
     "format_timestamp",

@@ -177,6 +177,27 @@ def test_check_token_never_prints_secret_or_credentials_path(
     assert str(credentials_path) not in output
 
 
+def test_parser_accepts_knowledge_search_contract() -> None:
+    args = cli._build_parser().parse_args(
+        [
+            "knowledge-search",
+            "退款规则",
+            "--knowledge-base-id",
+            "7526",
+            "--recall-scope",
+            "personal",
+            "--limit",
+            "8",
+            "--format",
+            "json",
+        ]
+    )
+    assert args.command == "knowledge-search"
+    assert args.knowledge_base_ids == ["7526"]
+    assert args.recall_scopes == ["personal"]
+    assert args.limit == 8
+
+
 def test_parser_requires_one_favlist_identifier() -> None:
     parser = cli._build_parser()
     with pytest.raises(SystemExit):
@@ -216,6 +237,34 @@ def test_user_contents_json_dispatch(capsys) -> None:
     assert kwargs["content_type"] == "answer"
     assert kwargs["offset"] == "20"
     assert kwargs["oauth_token"] == "oauth-x"
+
+
+def test_knowledge_upload_dispatches_local_path(capsys) -> None:
+    run_knowledge_upload = AsyncMock(
+        return_value=CommandResult(
+            success=True,
+            data={"RecallContentID": "recall-1"},
+        )
+    )
+    with patch.object(
+        cli.commands, "run_knowledge_upload", new=run_knowledge_upload
+    ):
+        exit_code = cli.main(
+            [
+                "knowledge-upload",
+                "notes.md",
+                "--knowledge-base-id",
+                "7526",
+                "--format",
+                "json",
+            ]
+        )
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["kind"] == "knowledge_upload"
+    kwargs = run_knowledge_upload.await_args.kwargs
+    assert kwargs["file_path"] == "notes.md"
+    assert kwargs["knowledge_base_id"] == "7526"
 
 
 def test_pdf_upload_dispatches_local_path(capsys) -> None:

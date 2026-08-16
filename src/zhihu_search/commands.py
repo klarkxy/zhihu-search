@@ -71,6 +71,7 @@ def _breaker_open_msg(kind: QuotaKind, tracker: QuotaTracker) -> str:
         "trending": "热榜",
         "ask": "直答",
         "user": "用户",
+        "knowledge": "知识库",
         "pdf": "PDF",
         "ppt": "PPT",
     }.get(kind, kind)
@@ -308,6 +309,72 @@ async def run_favlist_contents(
             offset=offset,
             limit=limit,
             oauth_token=oauth_token,
+        ),
+        client,
+    )
+
+
+async def run_knowledge_bases(
+    scope: str = "all",
+    client: ZhihuRestClient | None = None,
+) -> CommandResult:
+    """获取当前用户创建或订阅的知识库。"""
+    return await _run_command(
+        "knowledge",
+        lambda own: own.knowledge_bases(scope=scope),
+        client,
+    )
+
+
+async def run_knowledge_items(
+    knowledge_base_id: str,
+    cursor: str = "",
+    limit: int = 20,
+    client: ZhihuRestClient | None = None,
+) -> CommandResult:
+    """分页获取指定知识库中的内容。"""
+    return await _run_command(
+        "knowledge",
+        lambda own: own.knowledge_items(
+            knowledge_base_id,
+            cursor=cursor,
+            limit=limit,
+        ),
+        client,
+    )
+
+
+async def run_knowledge_upload(
+    file_path: str,
+    knowledge_base_id: str | None = None,
+    client: ZhihuRestClient | None = None,
+) -> CommandResult:
+    """上传本地文件到知识库。"""
+    return await _run_command(
+        "knowledge",
+        lambda own: own.upload_knowledge_file(
+            file_path=file_path,
+            knowledge_base_id=knowledge_base_id,
+        ),
+        client,
+    )
+
+
+async def run_knowledge_search(
+    query: str,
+    knowledge_base_ids: list[str] | None = None,
+    recall_scopes: list[str] | None = None,
+    limit: int = 10,
+    client: ZhihuRestClient | None = None,
+) -> CommandResult:
+    """在知识库中检索相关文档片段。"""
+    return await _run_command(
+        "knowledge",
+        lambda own: own.knowledge_search(
+            query=query,
+            knowledge_base_ids=knowledge_base_ids,
+            recall_scopes=recall_scopes,
+            limit=limit,
         ),
         client,
     )

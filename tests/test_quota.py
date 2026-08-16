@@ -32,6 +32,7 @@ def test_initial_snapshot_is_zero(tracker: QuotaTracker) -> None:
         "trending": {"used": 0},
         "ask": {"used": 0},
         "user": {"used": 0},
+        "knowledge": {"used": 0},
         "pdf": {"used": 0},
         "ppt": {"used": 0},
     }
@@ -53,11 +54,13 @@ def test_increment_isolated_per_kind(tracker: QuotaTracker) -> None:
 
 def test_new_quota_kinds_are_counted_independently(tracker: QuotaTracker) -> None:
     tracker.increment("user", 2)
+    tracker.increment("knowledge", 1)
     tracker.increment("pdf", 3)
     tracker.increment("ppt", 4)
 
     snap = tracker.snapshot()
     assert snap.by_kind["user"]["used"] == 2
+    assert snap.by_kind["knowledge"]["used"] == 1
     assert snap.by_kind["pdf"]["used"] == 3
     assert snap.by_kind["ppt"]["used"] == 4
     assert snap.by_kind["search"]["used"] == 0
@@ -341,6 +344,7 @@ def test_older_quota_file_without_breakers(tmp_path: Path) -> None:
     # 确认文件被读取（counts 保留），而非被日期重置跳过
     assert t.snapshot().by_kind["search"]["used"] == 5
     assert t.snapshot().by_kind["user"]["used"] == 0
+    assert t.snapshot().by_kind["knowledge"]["used"] == 0
     assert t.snapshot().by_kind["pdf"]["used"] == 0
     assert t.snapshot().by_kind["ppt"]["used"] == 0
     assert t.is_allowed("search") is True

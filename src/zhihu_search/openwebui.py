@@ -3,9 +3,10 @@
 This module exposes the model-safe subset of the CLI/MCP operations as a plain
 HTTP OpenAPI service that Open WebUI can import directly.
 
-Local PDF file upload and OAuth token exchange are intentionally CLI/Python
-only: accepting a server-local path would create a file-read primitive, while
-putting an OAuth app key in a model-visible request would leak a secret.
+Local PDF / knowledge-base file upload and OAuth token exchange are
+intentionally CLI/Python only: accepting a server-local path would create a
+file-read primitive, while putting an OAuth app key in a model-visible
+request would leak a secret.
 """
 
 from __future__ import annotations
@@ -183,6 +184,46 @@ class FavlistContentsRequest(UserDataRequest):
         return self
 
 
+class KnowledgeBasesRequest(ToolRequest):
+    """Knowledge-base listing request."""
+
+    scope: Literal["all", "created", "subscribed"] = Field(
+        "all",
+        description="all 全部，created 自己创建，subscribed 已订阅。",
+    )
+
+
+class KnowledgeItemsRequest(ToolRequest):
+    """Knowledge-base item listing request."""
+
+    knowledge_base_id: str = Field(..., min_length=1, description="知识库 ID。")
+    cursor: str = Field("", description="不透明分页游标；可直接传 NextCursor。")
+    limit: int = Field(20, ge=1, le=20, description="每页数量，最大 20。")
+
+
+class KnowledgeSearchRequest(ToolRequest):
+    """Knowledge-base RAG search request."""
+
+    query: str = Field(..., min_length=1, description="检索问题。")
+    knowledge_base_ids: list[str] = Field(
+        default_factory=list,
+        description="知识库 ID 列表。",
+    )
+    recall_scopes: list[Literal["personal", "subscription", "public"]] = Field(
+        default_factory=list,
+        description="召回范围。",
+    )
+    limit: int = Field(10, ge=1, le=10, description="返回文档数，最大 10。")
+
+    @model_validator(mode="after")
+    def validate_search_scope(self) -> "KnowledgeSearchRequest":
+        ids = [item.strip() for item in self.knowledge_base_ids if item.strip()]
+        if not ids and not self.recall_scopes:
+            raise ValueError("knowledge_base_ids 与 recall_scopes 至少需要提供一个")
+        self.knowledge_base_ids = ids
+        return self
+
+
 class PdfCreateRequest(ToolRequest):
     """PDF parse-task creation request."""
 
@@ -348,7 +389,7 @@ def create_app(api_key: str | None = None) -> FastAPI:
         version=__version__,
         description=(
             "知乎开放平台 OpenAPI 工具服务器，提供搜索、直答、热榜、"
-            "用户公开数据以及 PDF/PPT 异步任务操作。"
+            "用户公开数据、知识库以及 PDF/PPT 异步任务操作。"
         ),
         lifespan=lifespan,
     )
@@ -541,6 +582,77 @@ def create_app(api_key: str | None = None) -> FastAPI:
             else ""
         )
         return _response("favlist_contents", result, content)
+
+    @tool_router.post(
+        "/knowledge/bases",
+        response_model=ToolResponse,
+        operation_id="knowledge_bases",
+        summary="获取当前用户的知识库列表",
+    )
+    async def knowledge_bases(request: KnowledgeBasesRequest) -> ToolResponse:
+        try:
+            client = _get_client()
+        except credentials.CredentialsError as e:
+            return _credentials_error("knowledge_bases", e)
+        result = await commands.run_knowledge_bases(
+            scope=request.scope,
+            client=client,
+        )
+        content = (
+            formatters.format_knowledge_bases(result.data)
+            if result.success
+            else ""
+        )
+        return _response("knowledge_bases", result, content)
+
+    @tool_router.post(
+        "/knowledge/items",
+        response_model=ToolResponse,
+        operation_id="knowledge_items",
+        summary="获取指定知识库的内容列表",
+    )
+    async def knowledge_items(request: KnowledgeItemsRequest) -> ToolResponse:
+        try:
+            client = _get_client()
+        except credentials.CredentialsError as e:
+            return _credentials_error("knowledge_items", e)
+        result = await commands.run_knowledge_items(
+            knowledge_base_id=request.knowledge_base_id,
+            cursor=request.cursor,
+            limit=request.limit,
+            client=client,
+        )
+        content = (
+            formatters.format_knowledge_items(result.data)
+            if result.success
+            else ""
+        )
+        return _response("knowledge_items", result, content)
+
+    @tool_router.post(
+        "/knowledge/search",
+        response_model=ToolResponse,
+        operation_id="knowledge_search",
+        summary="在知识库中检索相关文档片段",
+    )
+    async def knowledge_search(request: KnowledgeSearchRequest) -> ToolResponse:
+        try:
+            client = _get_client()
+        except credentials.CredentialsError as e:
+            return _credentials_error("knowledge_search", e)
+        result = await commands.run_knowledge_search(
+            query=request.query,
+            knowledge_base_ids=request.knowledge_base_ids or None,
+            recall_scopes=request.recall_scopes or None,
+            limit=request.limit,
+            client=client,
+        )
+        content = (
+            formatters.format_knowledge_search(result.data)
+            if result.success
+            else ""
+        )
+        return _response("knowledge_search", result, content)
 
     @tool_router.post(
         "/pdf/create",

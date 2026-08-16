@@ -205,6 +205,47 @@ def test_mcp_tool_profiles_and_custom_allowlist(monkeypatch) -> None:
     )
 
 
+def test_capability_profiles_add_one_group_to_the_core_set() -> None:
+    assert server.resolve_mcp_tool_names("knowledge") == (
+        server.CORE_MCP_TOOL_NAMES | server.KNOWLEDGE_MCP_TOOL_NAMES
+    )
+    assert server.resolve_mcp_tool_names("user") == (
+        server.CORE_MCP_TOOL_NAMES | server.USER_MCP_TOOL_NAMES
+    )
+    assert server.resolve_mcp_tool_names("office") == (
+        server.CORE_MCP_TOOL_NAMES | server.OFFICE_MCP_TOOL_NAMES
+    )
+
+
+def test_profiles_and_tool_names_can_be_mixed_and_unioned() -> None:
+    assert server.resolve_mcp_tool_names("knowledge,user") == (
+        server.CORE_MCP_TOOL_NAMES
+        | server.KNOWLEDGE_MCP_TOOL_NAMES
+        | server.USER_MCP_TOOL_NAMES
+    )
+    assert server.resolve_mcp_tool_names("compact,knowledge_search") == (
+        server.CORE_MCP_TOOL_NAMES | {"knowledge_search"}
+    )
+    assert server.resolve_mcp_tool_names("knowledge,office") == (
+        server.ALL_MCP_TOOL_NAMES - server.USER_MCP_TOOL_NAMES
+    )
+
+
+def test_capability_groups_partition_the_optional_tools() -> None:
+    groups = (
+        server.USER_MCP_TOOL_NAMES,
+        server.KNOWLEDGE_MCP_TOOL_NAMES,
+        server.OFFICE_MCP_TOOL_NAMES,
+    )
+    assert set().union(*groups) == server.OPTIONAL_MCP_TOOL_NAMES
+    assert sum(len(group) for group in groups) == len(server.OPTIONAL_MCP_TOOL_NAMES)
+
+
+def test_profile_names_never_shadow_a_tool_name() -> None:
+    # Profile lookup wins while parsing, so a collision would hide that tool.
+    assert not set(server.MCP_TOOL_PROFILES) & server.ALL_MCP_TOOL_NAMES
+
+
 @pytest.mark.parametrize("selection", ["", "search,unknown"])
 def test_invalid_mcp_tool_selection_fails(selection: str) -> None:
     with pytest.raises(ValueError):
@@ -284,6 +325,34 @@ async def test_custom_allowlist_cannot_be_broadened_by_other() -> None:
 
     assert after_enable == {"search", "other"}
     assert after_disable == {"search", "other"}
+
+
+@pytest.mark.asyncio
+async def test_capability_profile_still_lets_other_reveal_every_tool() -> None:
+    server.configure_mcp_tools("knowledge")
+
+    async with Client(server.mcp) as client:
+        start = {tool.name for tool in await client.list_tools()}
+        assert start == server.CORE_MCP_TOOL_NAMES | server.KNOWLEDGE_MCP_TOOL_NAMES
+
+        await client.call_tool("other", {"action": "enable"})
+        assert {
+            tool.name for tool in await client.list_tools()
+        } == server.ALL_MCP_TOOL_NAMES
+
+
+@pytest.mark.asyncio
+async def test_mixing_a_profile_with_a_tool_name_keeps_profile_semantics() -> None:
+    server.configure_mcp_tools("compact,knowledge_search")
+
+    async with Client(server.mcp) as client:
+        assert {tool.name for tool in await client.list_tools()} == (
+            server.CORE_MCP_TOOL_NAMES | {"knowledge_search"}
+        )
+        await client.call_tool("other", {"action": "enable"})
+        assert {
+            tool.name for tool in await client.list_tools()
+        } == server.ALL_MCP_TOOL_NAMES
 
 
 @pytest.mark.asyncio

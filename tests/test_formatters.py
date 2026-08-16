@@ -133,6 +133,11 @@ class TestFormatContentItems:
                     "FavoriteCount": 20,
                     "Title": "如何理解某个问题？",
                     "Summary": "这是一段内容摘要。",
+                    "Author": {
+                        "Name": "示例作者",
+                        "Url": "https://www.zhihu.com/people/example-author",
+                        "Headline": "示例签名",
+                    },
                     "Favlists": [
                         {
                             "Title": "默认收藏夹",
@@ -156,6 +161,7 @@ class TestFormatContentItems:
         assert "赞同 128" in result
         assert "收藏 20" in result
         assert "默认收藏夹" in result
+        assert "示例作者" in result
         assert "opaque-cursor" in result
         assert "共 100 条" in result
 
@@ -316,11 +322,88 @@ class TestFormatTimestamp:
         assert result == "999999999999999"
 
 
+class TestFormatKnowledge:
+    def test_bases_and_items(self):
+        bases = formatters.format_knowledge_bases(
+            {
+                "Items": [
+                    {
+                        "KnowledgeBaseID": "7526",
+                        "Name": "产品资料",
+                        "Relation": "created",
+                        "IsDefault": True,
+                        "Visibility": "private",
+                        "ContentCount": 12,
+                        "UpdatedAt": 1710000000,
+                    }
+                ]
+            }
+        )
+        assert "产品资料" in bases
+        assert "7526" in bases
+        assert "默认知识库" in bases
+
+        items = formatters.format_knowledge_items(
+            {
+                "Items": [
+                    {
+                        "Title": "产品资料.pdf",
+                        "ContentType": "file",
+                        "Abstract": "文档摘要",
+                        "OriginUrl": "https://example.com/product.pdf",
+                        "RecallContentID": "recall-1",
+                    }
+                ],
+                "Total": 12,
+                "HasMore": True,
+                "NextCursor": "next-cursor",
+            }
+        )
+        assert "产品资料.pdf" in items
+        assert "recall-1" in items
+        assert "next-cursor" in items
+
+    def test_search_and_upload(self):
+        search = formatters.format_knowledge_search(
+            {
+                "Items": [
+                    {
+                        "DocName": "退款规则",
+                        "KnowledgeBaseID": "7526",
+                        "Content": ["七天内提交", "三个工作日到账"],
+                        "OriginUrl": "https://example.com/refund.md",
+                    }
+                ]
+            }
+        )
+        assert "退款规则" in search
+        assert "七天内提交" in search
+
+        upload = formatters.format_knowledge_upload(
+            {
+                "KnowledgeBaseID": "7526",
+                "RecallContentID": "recall-1",
+                "FileName": "产品资料.pdf",
+                "FileSize": 1048576,
+            }
+        )
+        assert "知识库上传成功" in upload
+        assert "recall-1" in upload
+
+    def test_empty(self):
+        assert "为空" in formatters.format_knowledge_bases(None)
+        assert "无匹配" in formatters.format_knowledge_search({"Items": []})
+
+
 def test_all_exports_new_formatters():
     assert {
         "format_content_items",
         "format_followees",
         "format_favlists",
+        "format_knowledge_bases",
+        "format_knowledge_items",
+        "format_knowledge_upload",
+        "format_knowledge_search",
         "format_upload_result",
         "format_task_status",
     }.issubset(formatters.__all__)

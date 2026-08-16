@@ -339,6 +339,31 @@ async def test_run_favlist_contents_passes_identifier_and_pagination():
 
 
 @pytest.mark.asyncio
+async def test_run_knowledge_search_passes_scope_and_ids():
+    mock_client = MagicMock()
+    mock_client.quota_tracker = _mock_tracker()
+    mock_client.knowledge_search = AsyncMock(
+        return_value=_mock_api_result({"Items": []})
+    )
+
+    result = await commands.run_knowledge_search(
+        "退款规则",
+        knowledge_base_ids=["7526"],
+        recall_scopes=["personal"],
+        limit=8,
+        client=mock_client,
+    )
+
+    assert result.success is True
+    mock_client.knowledge_search.assert_awaited_once_with(
+        query="退款规则",
+        knowledge_base_ids=["7526"],
+        recall_scopes=["personal"],
+        limit=8,
+    )
+    mock_client.quota_tracker.record_success.assert_called_once_with("knowledge")
+
+
 async def test_run_pdf_upload_accepts_non_dict_payload():
     mock_client = MagicMock()
     mock_client.quota_tracker = _mock_tracker()

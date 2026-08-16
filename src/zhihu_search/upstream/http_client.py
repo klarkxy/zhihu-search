@@ -4,6 +4,7 @@
 
 - 内容能力：知乎搜索、全网搜索、热榜、直答。
 - 用户能力：创作内容、关注、近期收藏、收藏夹及收藏夹内容。
+- 知识库能力：列表、内容、文件上传与 RAG 检索。
 - 文件能力：PDF 上传与解析任务。
 - 生成能力：根据知乎回答或文章创建 PPT 任务。
 
@@ -23,7 +24,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -50,6 +51,10 @@ _CODE_TO_ERROR: dict[int, type[McpError]] = {
     40001: InvalidArguments,    # 幂等键与请求参数冲突
     40002: InvalidArguments,    # 文件不存在、过期或不可访问
     40003: RateLimited,         # 活跃任务数超限
+    40004: InvalidArguments,    # 知识库不存在
+    40005: InvalidArguments,    # 相同文件正在处理中
+    40006: InvalidArguments,    # 文件解析失败
+    50002: UpstreamUnavailable, # 知识库检索失败
     90001: UpstreamUnavailable, # 内部错误
 }
 
@@ -60,25 +65,78 @@ UserContentType = Literal[
 ]
 UserSortField = Literal["like_count", "ts"]
 SortOrder = Literal["asc", "desc"]
+KnowledgeScope = Literal["all", "created", "subscribed"]
+KnowledgeRecallScope = Literal["personal", "subscription", "public"]
 
 # 各接口的参数上下界
 ZHIHU_SEARCH_MAX = 10
 GLOBAL_SEARCH_MAX = 20
 HOT_LIST_MAX = 30
 USER_PAGE_MAX = 50
+KNOWLEDGE_ITEMS_MAX = 20
+KNOWLEDGE_SEARCH_MAX = 10
 PDF_MAX_BYTES = 100 * 1024 * 1024
+KNOWLEDGE_FILE_MAX_BYTES = 100 * 1024 * 1024
+KNOWLEDGE_FILENAME_MAX_BYTES = 255
 QUERY_MIN = 2
 QUERY_MAX = 100
 INT64_MAX = (1 << 63) - 1
 
 DEFAULT_TIMEOUT = 30.0
 ZHIDA_TIMEOUT = 120.0  # agent 模型可能慢
+KNOWLEDGE_UPLOAD_TIMEOUT = 180.0  # 同步解析，大文件可能较慢
 
 _USER_CONTENT_TYPES = frozenset(
     {"all", "answer", "article", "zvideo", "pin", "question"}
 )
 _USER_SORT_FIELDS = frozenset({"like_count", "ts"})
 _SORT_ORDERS = frozenset({"asc", "desc"})
+_KNOWLEDGE_SCOPES = frozenset({"all", "created", "subscribed"})
+_KNOWLEDGE_RECALL_SCOPES = frozenset({"personal", "subscription", "public"})
+_KNOWLEDGE_FILE_EXTENSIONS = frozenset(
+    {
+        ".pdf",
+        ".md",
+        ".txt",
+        ".ppt",
+        ".pptx",
+        ".xlsx",
+        ".xls",
+        ".docx",
+        ".doc",
+        ".webp",
+        ".png",
+        ".jpg",
+        ".mobi",
+        ".epub",
+        ".csv",
+        ".azw3",
+    }
+)
+_KNOWLEDGE_CONTENT_TYPES = {
+    ".pdf": "application/pdf",
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    ),
+    ".xlsx": (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ),
+    ".xls": "application/vnd.ms-excel",
+    ".docx": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ),
+    ".doc": "application/msword",
+    ".webp": "image/webp",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".mobi": "application/x-mobipocket-ebook",
+    ".epub": "application/epub+zip",
+    ".csv": "text/csv",
+    ".azw3": "application/vnd.amazon.ebook",
+}
 _ZHIHU_ANSWER_PATHS = (
     re.compile(r"^/answer/[0-9]+/?$"),
     re.compile(r"^/question/[0-9]+/answer/[0-9]+/?$"),
@@ -432,6 +490,144 @@ class ZhihuRestClient:
         )
 
     # ------------------------------------------------------------------
+    # 知识库
+    # ------------------------------------------------------------------
+
+    async def knowledge_bases(
+        self,
+        *,
+        scope: KnowledgeScope = "all",
+    ) -> ApiResult:
+        """获取当前用户创建或订阅的知识库。"""
+        if not isinstance(scope, str) or scope not in _KNOWLEDGE_SCOPES:
+            raise InvalidArguments("scope 必须是 all、created 或 subscribed")
+        return await self._envelope_get(
+            "/api/v1/knowledge/bases",
+            {"Scope": scope},
+            kind="knowledge",
+        )
+
+    async def knowledge_items(
+        self,
+        knowledge_base_id: str,
+        *,
+        cursor: str = "",
+        limit: int = 20,
+    ) -> ApiResult:
+        """分页获取指定知识库中的内容。``cursor`` 可直接使用上一页的 ``NextCursor``。"""
+        self._validate_knowledge_base_id(knowledge_base_id)
+        self._validate_limit(limit, maximum=KNOWLEDGE_ITEMS_MAX)
+        params: dict[str, Any] = {"Limit": limit}
+        if cursor:
+            self._validate_nonempty_string(cursor, name="cursor")
+            params["Cursor"] = cursor
+        encoded_id = quote(knowledge_base_id, safe="")
+        return await self._envelope_get(
+            f"/api/v1/knowledge/bases/{encoded_id}/items",
+            params,
+            kind="knowledge",
+        )
+
+    async def upload_knowledge_file(
+        self,
+        file_path: str | Path,
+        *,
+        knowledge_base_id: str | None = None,
+    ) -> ApiResult:
+        """上传文件并同步完成解析和知识库挂载。
+
+        不指定 ``knowledge_base_id`` 时进入当前用户的默认知识库。该接口是
+        同步接口，较大文件可能较慢；超时或未知结果不要自动重试。
+        """
+        try:
+            path = Path(file_path)
+            stat = path.stat()
+        except (OSError, TypeError, ValueError) as exc:
+            raise InvalidArguments(f"知识库文件不可访问：{file_path}") from exc
+        if not path.is_file():
+            raise InvalidArguments(f"知识库路径不是文件：{path}")
+        if stat.st_size <= 0:
+            raise InvalidArguments("知识库文件内容不能为空")
+        if stat.st_size > KNOWLEDGE_FILE_MAX_BYTES:
+            raise InvalidArguments("知识库文件大小不能超过 100MB")
+
+        filename = self._validate_knowledge_filename(path.name)
+        suffix = Path(filename).suffix.lower()
+        if suffix not in _KNOWLEDGE_FILE_EXTENSIONS:
+            raise InvalidArguments(
+                "知识库上传仅支持 pdf、md、txt、ppt、pptx、xlsx、xls、"
+                "docx、doc、webp、png、jpg、mobi、epub、csv、azw3"
+            )
+        if knowledge_base_id is not None:
+            self._validate_knowledge_base_id(knowledge_base_id)
+
+        content_type = _KNOWLEDGE_CONTENT_TYPES.get(
+            suffix, "application/octet-stream"
+        )
+        data: dict[str, str] | None = None
+        if knowledge_base_id is not None:
+            data = {"KnowledgeBaseID": knowledge_base_id}
+
+        try:
+            with path.open("rb") as stream:
+                resp = await self._client.post(
+                    "/api/v1/knowledge/files",
+                    data=data,
+                    files={
+                        "File": (filename, stream, content_type),
+                    },
+                    headers=self._headers(content_type=None),
+                    timeout=KNOWLEDGE_UPLOAD_TIMEOUT,
+                )
+        except httpx.TimeoutException as exc:
+            raise UpstreamTimeout(
+                f"/api/v1/knowledge/files 请求超时（>{KNOWLEDGE_UPLOAD_TIMEOUT}s）；"
+                "请不要对超时或未知结果自动重试"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise UpstreamUnavailable(
+                f"/api/v1/knowledge/files 网络错误：{exc}"
+            ) from exc
+        except OSError as exc:
+            raise InvalidArguments(f"读取知识库文件失败：{path}") from exc
+        return self._parse_envelope(
+            resp, "/api/v1/knowledge/files", kind="knowledge"
+        )
+
+    async def knowledge_search(
+        self,
+        query: str,
+        *,
+        knowledge_base_ids: list[str] | None = None,
+        recall_scopes: list[KnowledgeRecallScope] | None = None,
+        limit: int = 10,
+    ) -> ApiResult:
+        """使用 RAG 从指定知识库或召回范围中检索相关文档片段。"""
+        if not isinstance(query, str):
+            raise InvalidArguments("query 不能为空")
+        query = query.strip()
+        self._validate_nonempty_string(query, name="query")
+        self._validate_limit(limit, maximum=KNOWLEDGE_SEARCH_MAX)
+
+        ids = self._normalize_knowledge_base_ids(knowledge_base_ids)
+        scopes = self._normalize_recall_scopes(recall_scopes)
+        if not ids and not scopes:
+            raise InvalidArguments(
+                "KnowledgeBaseIDs 与 RecallScopes 至少需要提供一个非空值"
+            )
+
+        body: dict[str, Any] = {"Query": query, "Limit": limit}
+        if ids:
+            body["KnowledgeBaseIDs"] = ids
+        if scopes:
+            body["RecallScopes"] = scopes
+        return await self._envelope_post(
+            "/api/v1/knowledge/search",
+            body,
+            kind="knowledge",
+        )
+
+    # ------------------------------------------------------------------
     # PDF 解析与 PPT 生成
     # ------------------------------------------------------------------
 
@@ -680,6 +876,54 @@ class ZhihuRestClient:
         if not isinstance(value, str) or not value.strip():
             raise InvalidArguments(f"{name} 不能为空")
 
+    @classmethod
+    def _validate_knowledge_base_id(cls, knowledge_base_id: str) -> None:
+        cls._validate_nonempty_string(
+            knowledge_base_id, name="knowledge_base_id"
+        )
+
+    @staticmethod
+    def _validate_knowledge_filename(name: str) -> str:
+        cleaned = Path(name).name.strip()
+        if not cleaned:
+            raise InvalidArguments("知识库文件名不能为空")
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in cleaned):
+            raise InvalidArguments("知识库文件名不能包含控制字符")
+        if len(cleaned.encode("utf-8")) > KNOWLEDGE_FILENAME_MAX_BYTES:
+            raise InvalidArguments("知识库文件名不能超过 255 个 UTF-8 字节")
+        return cleaned
+
+    @classmethod
+    def _normalize_knowledge_base_ids(
+        cls, knowledge_base_ids: list[str] | None
+    ) -> list[str]:
+        if knowledge_base_ids is None:
+            return []
+        if not isinstance(knowledge_base_ids, list):
+            raise InvalidArguments("knowledge_base_ids 必须是字符串列表")
+        normalized: list[str] = []
+        for item in knowledge_base_ids:
+            cls._validate_knowledge_base_id(item)
+            normalized.append(item.strip())
+        return normalized
+
+    @staticmethod
+    def _normalize_recall_scopes(
+        recall_scopes: list[KnowledgeRecallScope] | None,
+    ) -> list[str]:
+        if recall_scopes is None:
+            return []
+        if not isinstance(recall_scopes, list):
+            raise InvalidArguments("recall_scopes 必须是字符串列表")
+        normalized: list[str] = []
+        for item in recall_scopes:
+            if not isinstance(item, str) or item not in _KNOWLEDGE_RECALL_SCOPES:
+                raise InvalidArguments(
+                    "recall_scopes 只能包含 personal、subscription 或 public"
+                )
+            normalized.append(item)
+        return normalized
+
     @staticmethod
     def _validate_task_id(task_id: str, *, kind: Literal["PDF", "PPT"]) -> None:
         pattern = _PDF_TASK_ID if kind == "PDF" else _PPT_TASK_ID
@@ -721,11 +965,16 @@ __all__ = [
     "UserContentType",
     "UserSortField",
     "SortOrder",
+    "KnowledgeScope",
+    "KnowledgeRecallScope",
     "ZHIHU_SEARCH_MAX",
     "GLOBAL_SEARCH_MAX",
     "HOT_LIST_MAX",
     "USER_PAGE_MAX",
+    "KNOWLEDGE_ITEMS_MAX",
+    "KNOWLEDGE_SEARCH_MAX",
     "PDF_MAX_BYTES",
+    "KNOWLEDGE_FILE_MAX_BYTES",
     "QUERY_MIN",
     "QUERY_MAX",
 ]

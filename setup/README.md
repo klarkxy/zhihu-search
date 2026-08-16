@@ -75,9 +75,15 @@ uvx zhihu-search serve --tools compact
 ```
 
 compact 只暴露 `search`、`ask`、`trending` 和 `other`。`other` 可在当前
-会话中通过 `enable`、`disable`、`reset` 展开、收起或复原 9 个低频工具。
-如需一次暴露全部 13 个工具，使用 `--tools full`；也可传入
-`search,ask,pdf_status` 这类严格逗号 allowlist。自定义列表中的 `other`
+会话中通过 `enable`、`disable`、`reset` 展开、收起或复原 12 个低频工具。
+
+除 `compact` 和 `full` 外，还有 `knowledge`、`user`、`office` 三个档位，
+各自在 compact 基础上常驻一组能力。档位名与工具名可以逗号混写取并集，
+例如 `--tools knowledge,user` 或 `--tools compact,knowledge_search`。
+建有知乎知识库、希望私有文档检索始终可见的用户，推荐 `--tools knowledge`，
+否则模型看不到该工具时会静默退回全网搜索。
+
+只写工具名（如 `search,ask,pdf_status`）则是严格 allowlist，其中的 `other`
 只能管理已经列入 allowlist 的低频工具，不能展开被排除的工具。
 
 `ZHIHU_MCP_TOOLS` 可设置默认工具配置，命令行 `--tools` 优先。

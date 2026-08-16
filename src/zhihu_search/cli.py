@@ -15,6 +15,7 @@ Commands (默认: serve):
     ask <query>        向知乎直答提问
     trending           查看知乎热榜
     user-*             查询用户公开内容、关注与收藏
+    knowledge-*        查询知识库、上传文件、检索文档
     pdf-* / ppt-*      上传文件、创建任务、查询任务状态
     oauth-*            生成授权 URL、交换 OAuth access token
 
@@ -88,8 +89,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(
         dest="command",
         metavar=(
-            "{install-skill,search,ask,trending,user-*,pdf-*,ppt-*,"
-            "oauth-*,serve,openwebui}"
+            "{install-skill,search,ask,trending,user-*,knowledge-*,"
+            "pdf-*,ppt-*,oauth-*,serve,openwebui}"
         ),
     )
 
@@ -126,7 +127,8 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PROFILE_OR_LIST",
         default=None,
         help=(
-            "工具开关：compact（默认）、full，或逗号分隔的工具名；"
+            "工具开关：档位 compact（默认）、knowledge、user、office、full，"
+            "或逗号分隔的档位与工具名混写（如 knowledge,user）；"
             "也可设置 ZHIHU_MCP_TOOLS。"
         ),
     )
@@ -274,6 +276,74 @@ def _build_parser() -> argparse.ArgumentParser:
         help="可选 OAuth token；也可设置 ZHIHU_OAUTH_TOKEN。",
     )
     flc.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown",
+        help="输出格式。",
+    )
+
+    # --- 知识库 ---
+    kbl = sub.add_parser("knowledge-bases", help="获取当前用户的知识库列表。")
+    kbl.add_argument(
+        "--scope",
+        choices=["all", "created", "subscribed"],
+        default="all",
+        help="知识库范围。",
+    )
+    kbl.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown",
+        help="输出格式。",
+    )
+
+    kbi = sub.add_parser("knowledge-items", help="获取指定知识库的内容列表。")
+    kbi.add_argument("knowledge_base_id", help="知识库 ID。")
+    kbi.add_argument(
+        "--cursor",
+        default="",
+        help="分页游标；可直接使用返回的 NextCursor。",
+    )
+    kbi.add_argument("--limit", type=int, default=20, help="返回数量，最大 20。")
+    kbi.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown",
+        help="输出格式。",
+    )
+
+    kbu = sub.add_parser(
+        "knowledge-upload",
+        help="上传本机文件到知识库并同步解析。",
+    )
+    kbu.add_argument(
+        "file",
+        help="本机文件路径（最大 100MB；支持 pdf/md/txt/office/图片等）。",
+    )
+    kbu.add_argument(
+        "--knowledge-base-id",
+        default="",
+        help="目标知识库 ID；省略则使用默认知识库。",
+    )
+    kbu.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown",
+        help="输出格式。",
+    )
+
+    kbs = sub.add_parser("knowledge-search", help="在知识库中检索相关文档片段。")
+    kbs.add_argument("query", help="检索问题。")
+    kbs.add_argument(
+        "--knowledge-base-id",
+        action="append",
+        default=[],
+        dest="knowledge_base_ids",
+        metavar="ID",
+        help="知识库 ID，可重复；与 --recall-scope 至少提供一类。",
+    )
+    kbs.add_argument(
+        "--recall-scope",
+        action="append",
+        default=[],
+        dest="recall_scopes",
+        choices=["personal", "subscription", "public"],
+        help="召回范围，可重复；与 --knowledge-base-id 至少提供一类。",
+    )
+    kbs.add_argument("--limit", type=int, default=10, help="返回文档数，最大 10。")
+    kbs.add_argument(
         "--format", choices=["markdown", "json"], default="markdown",
         help="输出格式。",
     )
@@ -435,6 +505,14 @@ def _print_markdown(result: commands.CommandResult, kind: str, **fmt_kw: object)
         text = formatters.format_favlists(result.data)
     elif kind == "favlist_contents":
         text = formatters.format_content_items(result.data, heading="知乎收藏夹内容")
+    elif kind == "knowledge_bases":
+        text = formatters.format_knowledge_bases(result.data)
+    elif kind == "knowledge_items":
+        text = formatters.format_knowledge_items(result.data)
+    elif kind == "knowledge_upload":
+        text = formatters.format_knowledge_upload(result.data)
+    elif kind == "knowledge_search":
+        text = formatters.format_knowledge_search(result.data)
     elif kind == "pdf_upload":
         text = formatters.format_upload_result(result.data)
     elif kind in {"pdf_create", "pdf_status"}:
@@ -542,6 +620,46 @@ async def _run_favlist_contents(args: argparse.Namespace) -> int:
     if args.format == "json":
         return _print_json(result, "favlist_contents")
     return _print_markdown(result, "favlist_contents")
+
+
+async def _run_knowledge_bases(args: argparse.Namespace) -> int:
+    result = await commands.run_knowledge_bases(scope=args.scope)
+    if args.format == "json":
+        return _print_json(result, "knowledge_bases")
+    return _print_markdown(result, "knowledge_bases")
+
+
+async def _run_knowledge_items(args: argparse.Namespace) -> int:
+    result = await commands.run_knowledge_items(
+        knowledge_base_id=args.knowledge_base_id,
+        cursor=args.cursor,
+        limit=args.limit,
+    )
+    if args.format == "json":
+        return _print_json(result, "knowledge_items")
+    return _print_markdown(result, "knowledge_items")
+
+
+async def _run_knowledge_upload(args: argparse.Namespace) -> int:
+    result = await commands.run_knowledge_upload(
+        file_path=args.file,
+        knowledge_base_id=args.knowledge_base_id or None,
+    )
+    if args.format == "json":
+        return _print_json(result, "knowledge_upload")
+    return _print_markdown(result, "knowledge_upload")
+
+
+async def _run_knowledge_search(args: argparse.Namespace) -> int:
+    result = await commands.run_knowledge_search(
+        query=args.query,
+        knowledge_base_ids=args.knowledge_base_ids or None,
+        recall_scopes=args.recall_scopes or None,
+        limit=args.limit,
+    )
+    if args.format == "json":
+        return _print_json(result, "knowledge_search")
+    return _print_markdown(result, "knowledge_search")
 
 
 async def _run_pdf_upload(args: argparse.Namespace) -> int:
@@ -750,6 +868,14 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(_run_user_favlists(args))
         if args.command == "favlist-contents":
             return asyncio.run(_run_favlist_contents(args))
+        if args.command == "knowledge-bases":
+            return asyncio.run(_run_knowledge_bases(args))
+        if args.command == "knowledge-items":
+            return asyncio.run(_run_knowledge_items(args))
+        if args.command == "knowledge-upload":
+            return asyncio.run(_run_knowledge_upload(args))
+        if args.command == "knowledge-search":
+            return asyncio.run(_run_knowledge_search(args))
         if args.command == "pdf-upload":
             return asyncio.run(_run_pdf_upload(args))
         if args.command == "pdf-create":

@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-zhihu-search",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "description": "GitHub-installable DeepSeek Harness bundle for the zhihu-search MCP server",
   "type": "module",
   "files": [

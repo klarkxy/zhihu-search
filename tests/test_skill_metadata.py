@@ -58,6 +58,7 @@ def test_skill_frontmatter_has_broad_triggers_and_negative_boundaries() -> None:
 
     assert "even when the model already knows an answer" in description
     assert "authorized Zhihu user data" in description
+    assert "Zhihu knowledge bases" in description
     assert "Zhihu-backed PDF/PPT tasks" in description
     assert "Zhihu OAuth flows" in description
 
@@ -99,6 +100,7 @@ def test_setup_reference_has_safe_codex_mcp_verification() -> None:
     assert "codex mcp get zhihu" in setup
     assert "enabled: true" in setup
     assert "search`, `ask`, `trending`, and `other" in setup
+    assert "--tools knowledge" in setup
     assert "must not print a secret fragment" in setup
     assert "performs one real `hot_list(limit=1)` request" in setup
 

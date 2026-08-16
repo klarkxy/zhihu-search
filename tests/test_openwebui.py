@@ -46,6 +46,9 @@ def test_openapi_exposes_every_model_safe_new_operation() -> None:
         "/user/collections": "user_collections",
         "/user/favlists": "user_favlists",
         "/user/favlist-contents": "favlist_contents",
+        "/knowledge/bases": "knowledge_bases",
+        "/knowledge/items": "knowledge_items",
+        "/knowledge/search": "knowledge_search",
         "/pdf/create": "pdf_create",
         "/pdf/status": "pdf_status",
         "/ppt/create": "ppt_create",
@@ -58,6 +61,8 @@ def test_openapi_exposes_every_model_safe_new_operation() -> None:
 
     # Deliberate secret/file safety boundary.
     assert "/pdf/upload" not in schema["paths"]
+    assert "/knowledge/upload" not in schema["paths"]
+    assert "/knowledge/files" not in schema["paths"]
     assert not any(path.startswith("/oauth") for path in schema["paths"])
     user_schema = schema["components"]["schemas"]["UserContentsRequest"]
     assert "oauth_token" not in user_schema["properties"]
@@ -218,6 +223,12 @@ def test_user_contents_route_uses_server_side_oauth_and_pagination(
         json={"content_type": "all", "oauth_token": "must-not-be-in-body"},
     )
     assert rejected_secret.status_code == 422
+
+
+def test_knowledge_search_requires_scope_or_ids() -> None:
+    client = _client(api_key=None)
+    missing = client.post("/knowledge/search", json={"query": "退款规则"})
+    assert missing.status_code == 422
 
 
 def test_favlist_contents_requires_exactly_one_identifier() -> None:

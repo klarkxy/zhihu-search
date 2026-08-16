@@ -525,6 +525,171 @@ async def test_favlist_contents_rejects_invalid_identifiers(
 
 
 # ----------------------------------------------------------------------
+# 知识库
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_knowledge_bases_contract(tracker) -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(f"{BASE_URL}/api/v1/knowledge/bases").mock(
+            return_value=httpx.Response(
+                200,
+                json=_envelope(
+                    data={
+                        "Items": [
+                            {
+                                "KnowledgeBaseID": "7526139256098382426",
+                                "Name": "产品资料",
+                                "Relation": "created",
+                                "IsDefault": False,
+                                "Visibility": "private",
+                                "ContentCount": 12,
+                                "UpdatedAt": 1785902400,
+                            }
+                        ]
+                    }
+                ),
+            )
+        )
+        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+            result = await c.knowledge_bases(scope="created")
+
+    assert dict(route.calls.last.request.url.params) == {"Scope": "created"}
+    assert result.data["Items"][0]["KnowledgeBaseID"] == "7526139256098382426"
+    assert result.quota.by_kind["knowledge"]["used"] == 1
+
+
+@pytest.mark.asyncio
+async def test_knowledge_items_passes_opaque_cursor(tracker) -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(
+            f"{BASE_URL}/api/v1/knowledge/bases/7526139256098382426/items"
+        ).mock(
+            return_value=httpx.Response(
+                200,
+                json=_envelope(
+                    data={
+                        "Items": [],
+                        "Total": 12,
+                        "HasMore": True,
+                        "NextCursor": "next-cursor",
+                    }
+                ),
+            )
+        )
+        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+            result = await c.knowledge_items(
+                "7526139256098382426",
+                cursor="next-cursor",
+                limit=20,
+            )
+
+    assert dict(route.calls.last.request.url.params) == {
+        "Limit": "20",
+        "Cursor": "next-cursor",
+    }
+    assert result.data["NextCursor"] == "next-cursor"
+
+
+@pytest.mark.asyncio
+async def test_knowledge_search_requires_scope_or_ids(tracker) -> None:
+    async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        with pytest.raises(InvalidArguments, match="至少"):
+            await c.knowledge_search("退款规则")
+    assert tracker.snapshot().by_kind["knowledge"]["used"] == 0
+
+
+@pytest.mark.asyncio
+async def test_knowledge_search_contract(tracker) -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.post(f"{BASE_URL}/api/v1/knowledge/search").mock(
+            return_value=httpx.Response(
+                200,
+                json=_envelope(data={"Items": []}),
+            )
+        )
+        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+            await c.knowledge_search(
+                " 退款规则 ",
+                knowledge_base_ids=["7526139256098382426"],
+                recall_scopes=["personal"],
+                limit=10,
+            )
+
+    assert json.loads(route.calls.last.request.content) == {
+        "Query": "退款规则",
+        "Limit": 10,
+        "KnowledgeBaseIDs": ["7526139256098382426"],
+        "RecallScopes": ["personal"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_upload_knowledge_file_uses_documented_form_fields(
+    tracker, tmp_path
+) -> None:
+    pdf = tmp_path / "产品资料.pdf"
+    pdf.write_bytes(b"%PDF-1.7\nknowledge")
+    with respx.mock(assert_all_called=True) as router:
+        route = router.post(f"{BASE_URL}/api/v1/knowledge/files").mock(
+            return_value=httpx.Response(
+                200,
+                json=_envelope(
+                    data={
+                        "KnowledgeBaseID": "7526139256098382426",
+                        "RecallContentID": "recall-content-id",
+                        "FileName": "产品资料.pdf",
+                        "FileSize": 18,
+                    }
+                ),
+            )
+        )
+        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+            result = await c.upload_knowledge_file(
+                pdf, knowledge_base_id="7526139256098382426"
+            )
+
+    request = route.calls.last.request
+    content_type = request.headers["Content-Type"]
+    assert content_type.startswith("multipart/form-data; boundary=")
+    body = await request.aread()
+    assert 'name="File"; filename="产品资料.pdf"'.encode("utf-8") in body
+    assert b"name=\"KnowledgeBaseID\"" in body
+    assert b"7526139256098382426" in body
+    assert result.data["RecallContentID"] == "recall-content-id"
+    assert result.quota.by_kind["knowledge"]["used"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"scope": "mine"},
+        {"knowledge_base_id": ""},
+        {"limit": 21},
+        {"recall_scopes": ["private"]},
+    ],
+)
+async def test_knowledge_operations_reject_invalid_values(
+    tracker, kwargs
+) -> None:
+    async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        if "scope" in kwargs:
+            with pytest.raises(InvalidArguments):
+                await c.knowledge_bases(**kwargs)
+        elif "recall_scopes" in kwargs:
+            with pytest.raises(InvalidArguments):
+                await c.knowledge_search("问题", **kwargs)
+        elif "knowledge_base_id" in kwargs:
+            with pytest.raises(InvalidArguments):
+                await c.knowledge_items(**kwargs)
+        else:
+            with pytest.raises(InvalidArguments):
+                await c.knowledge_items("7526", **kwargs)
+
+
+# ----------------------------------------------------------------------
 # PDF 解析
 # ----------------------------------------------------------------------
 
@@ -789,6 +954,10 @@ async def test_task_status_rejects_path_traversal_before_request(
         (40001, InvalidArguments),
         (40002, InvalidArguments),
         (40003, RateLimited),
+        (40004, InvalidArguments),
+        (40005, InvalidArguments),
+        (40006, InvalidArguments),
+        (50002, UpstreamUnavailable),
     ],
 )
 async def test_new_documented_error_code_mapping(

@@ -45,12 +45,15 @@ codex mcp add zhihu -- uvx zhihu-search serve --tools compact
 codex mcp get zhihu
 ```
 
-Keep compact mode: it exposes `search`, `ask`, `trending`, and `other`. Once registered, the Skill
-must prefer these MCP tools over duplicate CLI calls. Run `codex mcp get zhihu` in the same target
-user context that wrote the configuration and confirm `enabled: true`, `command: uvx`, and the
-`zhihu-search serve --tools compact` arguments. Do not treat the add command's success message as
-the only evidence. Start or reopen a Codex task so the MCP catalog reloads; restart the client only
-if a fresh task still does not expose the tools.
+Keep compact mode by default: it exposes `search`, `ask`, `trending`, and `other`. Once
+registered, the Skill must prefer these MCP tools over duplicate CLI calls. If the user has Zhihu
+knowledge bases and wants private-document retrieval always visible, register
+`--tools knowledge` instead; also available are `user`, `office`, and `full`, and profile names
+may be mixed with tool names. Run `codex mcp get zhihu` in the same target user context that
+wrote the configuration and confirm `enabled: true`, `command: uvx`, and the
+`zhihu-search serve --tools compact` arguments (or the chosen profile). Do not treat the add
+command's success message as the only evidence. Start or reopen a Codex task so the MCP catalog
+reloads; restart the client only if a fresh task still does not expose the tools.
 
 ## Verify without forcing the brand name
 

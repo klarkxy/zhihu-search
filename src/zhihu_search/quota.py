@@ -12,6 +12,7 @@
 - ``trending``：热榜
 - ``ask``    ：直答（含 fast / thinking / agent 三个模型）
 - ``user``   ：用户内容、关注、收藏夹等
+- ``knowledge``：知识库列表、内容、上传与检索
 - ``pdf``    ：PDF 上传与解析任务
 - ``ppt``    ：PPT 生成任务
 
@@ -31,13 +32,14 @@ from threading import Lock
 from typing import Literal, Optional
 
 
-QuotaKind = Literal["search", "trending", "ask", "user", "pdf", "ppt"]
+QuotaKind = Literal["search", "trending", "ask", "user", "knowledge", "pdf", "ppt"]
 
 QUOTA_KINDS: tuple[QuotaKind, ...] = (
     "search",
     "trending",
     "ask",
     "user",
+    "knowledge",
     "pdf",
     "ppt",
 )
@@ -49,6 +51,7 @@ _KIND_LABELS: dict[str, str] = {
     "trending": "热榜",
     "ask": "直答",
     "user": "用户",
+    "knowledge": "知识库",
     "pdf": "PDF",
     "ppt": "PPT",
 }

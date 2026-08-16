@@ -115,3 +115,24 @@ def test_documentation_installs_the_github_repository() -> None:
 
     assert pinned_spec in (ROOT / "setup" / "dsh.md").read_text(encoding="utf-8")
     assert pinned_spec in (PLUGIN_DIR / "README.md").read_text(encoding="utf-8")
+
+
+def test_documentation_describes_mcp_capability_profiles() -> None:
+    markers = ("knowledge", "user", "office", "full")
+    for path in (
+        ROOT / "README.md",
+        ROOT / "AGENT_SETUP.md",
+        ROOT / "docs" / "API_COVERAGE.md",
+        ROOT / "setup" / "README.md",
+        ROOT / "setup" / "codex.md",
+        ROOT / "setup" / "claude-code.md",
+        ROOT / "setup" / "opencode.md",
+        ROOT / "setup" / "hanako-agent.md",
+        ROOT / "setup" / "dsh.md",
+        PLUGIN_DIR / "README.md",
+        ROOT / "skills" / "zhihu-search" / "SKILL.md",
+        ROOT / "skills" / "zhihu-search" / "references" / "setup.md",
+    ):
+        content = path.read_text(encoding="utf-8")
+        missing = [name for name in markers if name not in content]
+        assert not missing, f"{path.name} missing MCP profiles: {missing}"

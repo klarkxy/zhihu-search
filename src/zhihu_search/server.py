@@ -5,6 +5,7 @@
     ask      → 直答（OpenAI 兼容 chat completions）
     trending → 热榜
     user_*   → 用户公开内容、关注与收藏
+    knowledge_* → 知识库列表、内容与检索（上传留在本机 CLI）
     pdf_*    → PDF 解析任务创建/查询（上传留在本机 CLI）
     ppt_*    → PPT 生成任务创建/查询
     other    → 按当前会话展开、收起或重置上述低频工具
@@ -79,22 +80,39 @@ mcp = FastMCP("zhihu-search", instructions=MCP_INSTRUCTIONS)
 _client: ZhihuRestClient | None = None
 
 CORE_MCP_TOOL_NAMES = frozenset({"search", "ask", "trending", "other"})
-OPTIONAL_MCP_TOOL_NAMES = frozenset(
+USER_MCP_TOOL_NAMES = frozenset(
     {
         "user_contents",
         "user_followees",
         "user_collections",
         "user_favlists",
         "favlist_contents",
+    }
+)
+KNOWLEDGE_MCP_TOOL_NAMES = frozenset(
+    {
+        "knowledge_bases",
+        "knowledge_items",
+        "knowledge_search",
+    }
+)
+OFFICE_MCP_TOOL_NAMES = frozenset(
+    {
         "pdf_create",
         "pdf_status",
         "ppt_create",
         "ppt_status",
     }
 )
+OPTIONAL_MCP_TOOL_NAMES = (
+    USER_MCP_TOOL_NAMES | KNOWLEDGE_MCP_TOOL_NAMES | OFFICE_MCP_TOOL_NAMES
+)
 ALL_MCP_TOOL_NAMES = CORE_MCP_TOOL_NAMES | OPTIONAL_MCP_TOOL_NAMES
 MCP_TOOL_PROFILES = {
     "compact": CORE_MCP_TOOL_NAMES,
+    "knowledge": CORE_MCP_TOOL_NAMES | KNOWLEDGE_MCP_TOOL_NAMES,
+    "user": CORE_MCP_TOOL_NAMES | USER_MCP_TOOL_NAMES,
+    "office": CORE_MCP_TOOL_NAMES | OFFICE_MCP_TOOL_NAMES,
     "full": ALL_MCP_TOOL_NAMES,
 }
 _session_expandable_tool_names = OPTIONAL_MCP_TOOL_NAMES
@@ -113,41 +131,59 @@ def _effective_mcp_tool_selection(selection: str | None) -> str:
     )
 
 
+def _parse_mcp_tool_selection(value: str) -> tuple[frozenset[str], bool]:
+    """Expand a comma-separated mix of profile names and tool names.
+
+    Returns the resolved allowlist plus whether any profile name was used.
+    Profiles mean "start here, ``other`` may reveal the rest"; a list made only
+    of tool names is strict and cannot be broadened during a session.
+    """
+    parts = [part.strip() for part in value.strip().lower().split(",") if part.strip()]
+    if not parts:
+        raise ValueError("MCP 工具选择不能为空")
+
+    names: set[str] = set()
+    unknown: set[str] = set()
+    uses_profile = False
+    for part in parts:
+        profile = MCP_TOOL_PROFILES.get(part)
+        if profile is not None:
+            names |= profile
+            uses_profile = True
+        elif part in ALL_MCP_TOOL_NAMES:
+            names.add(part)
+        else:
+            unknown.add(part)
+
+    if unknown:
+        raise ValueError(
+            f"未知 MCP 工具或档位：{', '.join(sorted(unknown))}；"
+            f"可用档位：{', '.join(sorted(MCP_TOOL_PROFILES))}；"
+            f"可用工具：{', '.join(sorted(ALL_MCP_TOOL_NAMES))}"
+        )
+    return frozenset(names), uses_profile
+
+
 def resolve_mcp_tool_names(selection: str | None = None) -> frozenset[str]:
-    """Resolve a profile or strict comma-separated allowlist.
+    """Resolve profile names, tool names, or any comma-separated mix of both.
 
     An explicit CLI selection wins over ``ZHIHU_MCP_TOOLS``. The compact
     profile is the safe default because it keeps MCP discovery small while the
     ``other`` tool can reveal low-frequency operations per session.
     """
-    value = _effective_mcp_tool_selection(selection)
-    normalized = value.strip().lower()
-    if not normalized:
-        raise ValueError("MCP 工具选择不能为空")
-    if normalized in MCP_TOOL_PROFILES:
-        return MCP_TOOL_PROFILES[normalized]
-
-    names = frozenset(part.strip() for part in normalized.split(",") if part.strip())
-    if not names:
-        raise ValueError("MCP 工具选择不能为空")
-    unknown = names - ALL_MCP_TOOL_NAMES
-    if unknown:
-        supported = ", ".join(sorted(ALL_MCP_TOOL_NAMES))
-        invalid = ", ".join(sorted(unknown))
-        raise ValueError(f"未知 MCP 工具：{invalid}；可用工具：{supported}")
-    return names
+    return _parse_mcp_tool_selection(_effective_mcp_tool_selection(selection))[0]
 
 
 def configure_mcp_tools(selection: str | None = None) -> frozenset[str]:
     """Apply one process-wide MCP tool allowlist before the server starts."""
     global _session_expandable_tool_names
 
-    value = _effective_mcp_tool_selection(selection)
-    names = resolve_mcp_tool_names(value)
-    if value.strip().lower() in MCP_TOOL_PROFILES:
-        _session_expandable_tool_names = OPTIONAL_MCP_TOOL_NAMES
-    else:
-        _session_expandable_tool_names = names & OPTIONAL_MCP_TOOL_NAMES
+    names, uses_profile = _parse_mcp_tool_selection(
+        _effective_mcp_tool_selection(selection)
+    )
+    _session_expandable_tool_names = (
+        OPTIONAL_MCP_TOOL_NAMES if uses_profile else names & OPTIONAL_MCP_TOOL_NAMES
+    )
     mcp.enable(names=set(names), components={"tool"}, only=True)
     return names
 
@@ -506,6 +542,94 @@ async def favlist_contents(
 
 
 @mcp.tool(
+    name="knowledge_bases",
+    description=(
+        "获取当前用户创建或订阅的知乎直答知识库。"
+        "首次使用前需先登录 https://zhida.zhihu.com/repositories/square 完成初始化。"
+    ),
+)
+async def knowledge_bases(
+    scope: Literal["all", "created", "subscribed"] = "all",
+) -> ToolResult:
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
+    result = await commands.run_knowledge_bases(scope=scope, client=client)
+    if not result.success:
+        return _err(result.error or "未知错误", result)
+    return _ok(formatters.format_knowledge_bases(result.data), result)
+
+
+@mcp.tool(
+    name="knowledge_items",
+    description=(
+        "分页获取指定知识库中的内容。cursor 可直接传上一页 NextCursor；"
+        "请以 HasMore 判断是否继续翻页。"
+    ),
+)
+async def knowledge_items(
+    knowledge_base_id: Annotated[
+        str,
+        Field(min_length=1, description="知识库 ID。"),
+    ],
+    cursor: Annotated[
+        str,
+        Field(description="不透明分页游标；可直接传 NextCursor。"),
+    ] = "",
+    limit: Annotated[int, Field(ge=1, le=20, description="每页数量。")] = 20,
+) -> ToolResult:
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
+    result = await commands.run_knowledge_items(
+        knowledge_base_id=knowledge_base_id,
+        cursor=cursor,
+        limit=limit,
+        client=client,
+    )
+    if not result.success:
+        return _err(result.error or "未知错误", result)
+    return _ok(formatters.format_knowledge_items(result.data), result)
+
+
+@mcp.tool(
+    name="knowledge_search",
+    description=(
+        "使用 RAG 从指定知识库或召回范围检索文档片段。"
+        "knowledge_base_ids 与 recall_scopes 至少提供一个。"
+    ),
+)
+async def knowledge_search(
+    query: Annotated[str, Field(min_length=1, description="检索问题。")],
+    knowledge_base_ids: Annotated[
+        list[str] | None,
+        Field(description="知识库 ID 列表。"),
+    ] = None,
+    recall_scopes: Annotated[
+        list[Literal["personal", "subscription", "public"]] | None,
+        Field(description="召回范围：personal、subscription、public。"),
+    ] = None,
+    limit: Annotated[int, Field(ge=1, le=10, description="返回文档数。")] = 10,
+) -> ToolResult:
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
+    result = await commands.run_knowledge_search(
+        query=query,
+        knowledge_base_ids=knowledge_base_ids or None,
+        recall_scopes=recall_scopes or None,
+        limit=limit,
+        client=client,
+    )
+    if not result.success:
+        return _err(result.error or "未知错误", result)
+    return _ok(formatters.format_knowledge_search(result.data), result)
+
+
+@mcp.tool(
     name="pdf_create",
     description=(
         "使用已上传的 file_id 创建 PDF 解析任务。文件上传需先在运行服务的"
@@ -619,8 +743,9 @@ async def ppt_status(
     name="other",
     title="其他",
     description=(
-        "按当前 MCP 会话展开或收起低频工具。action='enable' 展开用户数据、"
-        "PDF 和 PPT 工具；'disable' 收起；'reset' 恢复服务器启动配置。"
+        "按当前 MCP 会话展开或收起低频工具。action='enable' 展开：授权用户"
+        "自己的创作/关注/收藏数据、自建知识库内的私有文档检索、PDF 解析与 "
+        "PPT 生成；'disable' 收起；'reset' 恢复服务器启动配置。"
     ),
 )
 async def other(

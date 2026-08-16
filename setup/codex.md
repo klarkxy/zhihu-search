@@ -34,8 +34,10 @@ args = ["zhihu-search", "serve", "--tools", "compact"]
 ```
 
 保留文件中已有的其他配置，不要把 Access Secret 或 OAuth token 写进这里。
-如需一次暴露全部 13 个工具，将 `compact` 改为 `full`；其他开关见
-[通用安装说明](README.md#3-配置-mcp高频使用)。
+建有知乎知识库时将 `compact` 改为 `knowledge`，避免私有文档检索被静默
+退回全网搜索；用户数据用 `user`，PDF/PPT 用 `office`，一次暴露全部 16
+个工具用 `full`。档位与工具名也可逗号混写。完整开关见
+[通用安装说明](README.md#4-配置-mcp高频使用)。
 
 Skill 与 MCP 同时可用时，Skill 优先调用 `search`、`ask`、`trending`；只有
 MCP 不可用时才回退 `uvx`。
@@ -58,4 +60,4 @@ MCP 不可用时才回退 `uvx`。
 
 > 现在大家都在讨论什么热点？
 
-如果工具没有出现或调用失败，查看 [通用排障](README.md#通用排障)。
+如果工具没有出现或调用失败，查看 [通用排障](README.md#维护与排障)。
