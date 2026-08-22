@@ -22,6 +22,10 @@ dsh plugin --profile web add "github:klarkxy/zhihu-search"
 dsh --profile web --dump-config
 ```
 
+Plugin-search tools and DSH marketplaces index the GitHub topic
+`dsh-plugin`. That topic lives on the repository About page, not in this
+tree; `package.json` keywords do not publish it.
+
 Stop and restart the profile after a persistent install. The initial compact
 catalog contains:
 

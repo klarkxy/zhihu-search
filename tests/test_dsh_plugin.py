@@ -51,6 +51,7 @@ def test_dsh_bundle_manifest_is_git_installable_and_version_locked() -> None:
         "LICENSE",
     }
     assert "publishConfig" not in manifest
+    assert "dsh-plugin" in manifest["keywords"]
     assert manifest["repository"] == {
         "type": "git",
         "url": "git+https://github.com/klarkxy/zhihu-search.git",

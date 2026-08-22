@@ -36,7 +36,12 @@ dsh plugin --profile web add "github:klarkxy/zhihu-search"
 
 No npm publication or install-time build permission is required: this bundle
 contains only a manifest and a declarative patch, with no `prepare` or other
-package scripts. For a local checkout:
+package scripts.
+
+Marketplace and plugin-search tools discover this bundle from the GitHub
+topic [`dsh-plugin`](https://github.com/topics/dsh-plugin), not from
+`package.json` keywords. Keep that topic on the public repository; `dsh
+plugin add` itself does not need it. For a local checkout:
 
 ```powershell
 dsh plugin --profile web add .
