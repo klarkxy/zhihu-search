@@ -66,7 +66,7 @@ uvx zhihu-search --help
 在仓库目录验证尚未发布的代码时，使用
 `uvx --from . zhihu-search <command>`。
 
-## 4. 配置 MCP（高频使用）
+## 4. MCP（高频集成）
 
 推荐显式启用 compact 模式：
 

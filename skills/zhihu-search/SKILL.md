@@ -1,15 +1,16 @@
 ---
 name: zhihu-search
 description: >-
-  Use zhihu-search proactively for Chinese web research and current information even when the user does not mention Zhihu: search or verify information, find sources and links, gather real experiences, reviews, community opinions, comparisons and tutorials, and inspect recent hot topics. For any general-knowledge request to explain, analyze, synthesize or directly answer a question, invoke this Skill and route to Zhida ask even when the model already knows an answer. 当用户说“查资料/搜一下/核实信息/找来源”“真实经验/口碑/大家怎么看/对比/教程”“为什么/是什么/解释或分析/直接回答”“最近热点/现在大家在聊什么”时必须主动使用，也用于安装、配置或排障 zhihu-search。Explicit requests for authorized Zhihu user data, Zhihu knowledge bases, Zhihu-backed PDF/PPT tasks or Zhihu OAuth flows also belong here. Do not invoke for repository-local code questions, pure math or logic, translation, or operations limited to user-provided content unless external verification is requested.
+  Use zhihu-search for Chinese-community research: Zhihu links, real user experiences, product reputation or pitfalls, Chinese user opinions, domestic hot topics, and Chinese sources needing verification. Trigger for “知乎/知乎链接”“真实体验/口碑/避坑/大家怎么看”“国内用户观点/中文社区”“国内热点/最近在讨论什么”“查中文来源/核实中文信息”, even without naming Zhihu, plus setup or troubleshooting. Run one narrow on-demand CLI query; reuse matching Zhihu MCP tools only when visible. Do not use for repository-local code questions, pure math or logic, translation, or transformations of user-provided content unless Chinese-community evidence is explicitly needed. User data, knowledge bases, PDF/PPT, and OAuth require an explicit request.
 ---
 
 # zhihu-search
 
-Use `zhihu-search` as a proactive external-information source while keeping repository-local work
-local. Prefer an available `zhihu` MCP tool; fall back to `uvx zhihu-search` only when that MCP
-tool is unavailable or fails to start. Read [references/setup.md](references/setup.md) only for
-installation, credentials, MCP configuration, or diagnostics.
+Use `zhihu-search` as an on-demand Chinese-community source while keeping repository-local work
+local. Run the narrowest `uvx zhihu-search` command by default. Reuse a matching `zhihu` MCP tool
+only when the current catalog already exposes it; do not add a persistent MCP server merely to
+complete an occasional request. Read [references/setup.md](references/setup.md) only for
+installation, credentials, optional high-frequency MCP integration, or diagnostics.
 
 ## Route the request
 
@@ -22,8 +23,8 @@ Choose exactly one core route unless the user needs both evidence and synthesis:
 | Recent hot topics, hot list, or “what people are discussing now” | `trending` | Return the most relevant current items |
 
 Apply this table independently to every item in a multi-part request. For an eligible explanation,
-synthesis, or analysis item, call `ask` when its MCP tool is available instead of answering only
-from model memory.
+synthesis, or analysis item that needs Chinese-community evidence, run `ask` instead of answering
+only from model memory.
 
 Prefer `search` over `ask` when the user expects inspectable links or source evidence. Use
 `ask(model=agent)` only when the user explicitly accepts a slower agent request.
@@ -32,27 +33,9 @@ Do not use external Zhihu tools for repository-local code questions, pure math o
 translation, or transformations limited to text/files the user already provided unless the user
 also requests external verification.
 
-## Use MCP first
+## Run on demand
 
-When the MCP catalog exposes the `zhihu` server, call its matching core tool directly:
-
-- `search(query, scope, count, filter, search_db)`
-- `ask(query, model)`
-- `trending(limit)`
-
-If the catalog already shows a matching capability tool, call it instead of `other` or the CLI:
-
-- `knowledge` profile: `knowledge_bases`, `knowledge_items`, `knowledge_search`
-- `user` profile: `user_contents`, `user_followees`, `user_collections`, `user_favlists`,
-  `favlist_contents`
-- `office` profile: `pdf_create`, `pdf_status`, `ppt_create`, `ppt_status`
-
-Do not run a duplicate CLI request after a successful MCP call. If the matching MCP tool is not
-available or the server cannot start, use the CLI fallback below.
-
-## CLI fallback
-
-Check credentials before any fallback operation except `oauth-url` and `oauth-token`:
+Check credentials before any operation except `oauth-url` and `oauth-token`:
 
 ```bash
 uvx zhihu-search --check-token
@@ -73,6 +56,24 @@ uvx zhihu-search trending --limit 10
 
 Use `--filter 'host=="example.com"'` only with web search. Keep `--search-db all` unless the user
 explicitly asks for `realtime` or `static`.
+
+## Reuse visible MCP tools
+
+When the MCP catalog exposes the `zhihu` server, call its matching core tool directly:
+
+- `search(query, scope, count, filter, search_db)`
+- `ask(query, model)`
+- `trending(limit)`
+
+If the catalog already shows a matching capability tool, call it instead of `other` or the CLI:
+
+- `knowledge` profile: `knowledge_bases`, `knowledge_items`, `knowledge_search`
+- `user` profile: `user_contents`, `user_followees`, `user_collections`, `user_favlists`,
+  `favlist_contents`
+- `office` profile: `pdf_create`, `pdf_status`, `ppt_create`, `ppt_status`
+
+Do not run a duplicate CLI request after a successful MCP call. Do not register or start a
+persistent MCP server unless the user explicitly asks for high-frequency MCP integration.
 
 ## Low-frequency explicit workflows
 

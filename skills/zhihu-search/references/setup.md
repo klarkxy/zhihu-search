@@ -1,7 +1,7 @@
 # Setup and diagnostics
 
-Read this reference only when installing, configuring, or diagnosing `zhihu-search`, or when the
-MCP-first route is unavailable.
+Read this reference only when installing, configuring, or diagnosing `zhihu-search`, or when an
+on-demand CLI request fails.
 
 ## Install the Skill
 
@@ -38,36 +38,29 @@ uvx zhihu-search --probe
 
 Never ask the user to paste an Access Secret, OAuth app key, or OAuth token into chat.
 
-## Register the compact MCP server in Codex
+## Keep Codex on demand by default
 
-```bash
-codex mcp add zhihu -- uvx zhihu-search serve --tools compact
-codex mcp get zhihu
-```
+For ordinary Codex use, install the Skill and let it run one narrow `uvx zhihu-search` command per
+eligible task. Do not register a global stdio MCP server merely to make the Skill available: Skill
+discovery is independent of MCP registration, and a long-lived Codex host may retain one stdio
+server process tree per task context until the host exits.
 
-Keep compact mode by default: it exposes `search`, `ask`, `trending`, and `other`. Once
-registered, the Skill must prefer these MCP tools over duplicate CLI calls. If the user has Zhihu
-knowledge bases and wants private-document retrieval always visible, register
-`--tools knowledge` instead; also available are `user`, `office`, and `full`, and profile names
-may be mixed with tool names. Run `codex mcp get zhihu` in the same target user context that
-wrote the configuration and confirm `enabled: true`, `command: uvx`, and the
-`zhihu-search serve --tools compact` arguments (or the chosen profile). Do not treat the add
-command's success message as the only evidence. Start or reopen a Codex task so the MCP catalog
-reloads; restart the client only if a fresh task still does not expose the tools.
+If the current catalog already exposes matching Zhihu MCP tools, reuse them and avoid a duplicate
+CLI call. Configure persistent MCP only when the user explicitly asks for high-frequency
+integration and accepts the client's process lifecycle. The available profiles are `compact`,
+`knowledge`, `user`, `office`, and `full`; profile names may be mixed with tool names.
 
 ## Verify without forcing the brand name
 
 Use representative requests such as:
 
-- `帮我查一下最近主流 RAG 评测方法，给出来源链接。`
+- `帮我查一下最近主流 RAG 评测方法在中文开发者社区的讨论，给出来源链接。`
 - `真实用户怎么评价这款产品？`
 - `现在大家都在讨论什么热点？`
 
-Also verify negative boundaries with a repository-local code question, a translation request, and
-a pure math problem; those must not invoke external Zhihu capabilities.
-
-A compact MCP protocol handshake must expose exactly `search`, `ask`, `trending`, and `other`
-before the live prompts are accepted as end-to-end proof.
+Each positive request should produce exactly one matching core route (`search`, `ask`, or
+`trending`). Also verify negative boundaries with a repository-local code question, a translation
+request, and a pure math problem; those must not invoke external Zhihu capabilities.
 
 ## Install the DeepSeek Harness bundle
 
@@ -94,5 +87,8 @@ uvx zhihu-search --probe
 uvx zhihu-search --help
 codex mcp list
 ```
+
+Use `codex mcp list` only to detect an unexpected persistent registration. Explain the lifecycle
+cost and ask before removing or changing user configuration.
 
 Use `uvx zhihu-search --reset-quota` only for local debugging and never as routine recovery.

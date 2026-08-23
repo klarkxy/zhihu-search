@@ -100,20 +100,13 @@ uvx zhihu-search <command> --help
 在仓库目录验证尚未发布的代码时，把命令开头改为
 `uvx --from . zhihu-search`。
 
-## 4. MCP（高频使用）
+## 4. MCP（高频集成）
 
 MCP 默认使用 `compact`，只暴露三个常用工具和一个按需入口：
 
-Codex 可以直接全局注册：
-
-```bash
-codex mcp add zhihu -- uvx zhihu-search serve --tools compact
-codex mcp get zhihu
-```
-
-第二条命令应显示 `enabled: true`、`command: uvx`，且参数包含
-`zhihu-search serve --tools compact`。注册成功后新建或重新打开 Codex
-任务；新任务仍未出现工具时再重启客户端。
+Codex 的普通、低频查询应安装 Skill 后按需运行 CLI，不需要全局注册 MCP。
+只有用户明确要求高频常驻集成，并接受客户端的进程生命周期时才配置 MCP。
+Codex 专用说明见 [setup/codex.md](setup/codex.md)。其他 MCP 客户端可启动：
 
 ```text
 command: uvx

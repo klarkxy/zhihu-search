@@ -12,47 +12,38 @@ uvx zhihu-search install-skill
 在所有仓库中可用。只有明确需要项目隔离时才加 `--project`。
 安装后重新打开 Codex 任务，让 Skill 目录重新加载。
 
-## 配置 MCP
+## 默认按需调用
 
-推荐直接执行：
+普通 Codex 使用只需要安装 Skill。命中中文社区研究、真实体验、口碑、国内热点
+或中文来源核实时，Skill 会按需执行一条最窄的 CLI 命令：
 
 ```bash
-codex mcp add zhihu -- uvx zhihu-search serve --tools compact
-codex mcp get zhihu
+uvx zhihu-search search "<query>" --scope zhihu --count 5
+uvx zhihu-search ask "<question>" --model fast
+uvx zhihu-search trending --limit 10
 ```
 
-`codex mcp get zhihu` 应显示 `enabled: true`、`command: uvx`，且参数包含
-`zhihu-search serve --tools compact`。请在写入配置的同一目标用户上下文中
-执行验证，不要只以 `Added global MCP server` 的提示作为安装完成证据。
+Skill 的发现与 MCP 注册相互独立。不要为了偶尔查询而把 stdio MCP 全局注册到
+Codex；长时间运行的宿主可能按任务上下文保留多套服务进程，直到宿主退出。
 
-也可以手动在 `~/.codex/config.toml` 中加入：
+## 可选的高频 MCP 集成
 
-```toml
-[mcp_servers.zhihu]
-command = "uvx"
-args = ["zhihu-search", "serve", "--tools", "compact"]
-```
-
-保留文件中已有的其他配置，不要把 Access Secret 或 OAuth token 写进这里。
-建有知乎知识库时将 `compact` 改为 `knowledge`，避免私有文档检索被静默
-退回全网搜索；用户数据用 `user`，PDF/PPT 用 `office`，一次暴露全部 16
-个工具用 `full`。档位与工具名也可逗号混写。完整开关见
-[通用安装说明](README.md#4-配置-mcp高频使用)。
-
-Skill 与 MCP 同时可用时，Skill 优先调用 `search`、`ask`、`trending`；只有
-MCP 不可用时才回退 `uvx`。
+只有用户明确要求高频、常驻集成，并接受目标客户端的进程生命周期时才配置
+MCP。`compact` 暴露 `search`、`ask`、`trending`、`other`；知识库用
+`knowledge`，用户数据用 `user`，PDF/PPT 用 `office`，全部工具用 `full`。
+完整服务端开关见 [通用安装说明](README.md#4-mcp高频集成)。当前目录已经
+暴露匹配 MCP 工具时，Skill 会直接复用，不再重复执行 CLI。
 
 ## 重启
 
-新建或重新打开 Codex 任务，让 MCP 工具目录重新加载。新任务仍未出现工具时，
-再关闭并重新打开 Codex 客户端；当前任务不会热更新刚注册的 MCP 工具。
+安装或更新 Skill 后新建任务。目录仍是旧版本时，再完整退出并重新打开 Codex
+客户端；当前任务不会热更新已经加载的 Skill 指令。
 
 ## 验证
 
-`compact` 模式的 MCP 握手应只暴露 `search`、`ask`、`trending`、`other`
-四个工具。然后发送：
+发送以下正例，并确认每条只走一条匹配的 `search`、`ask` 或 `trending` 路由：
 
-> 帮我查一下最近主流的 RAG 评测方法，返回 3 条结果并附来源链接。
+> 帮我查一下最近主流的 RAG 评测方法在中文开发者社区的讨论，返回 3 条结果并附来源链接。
 
 再分别验证：
 
