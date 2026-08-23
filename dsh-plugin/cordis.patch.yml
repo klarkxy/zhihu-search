@@ -1,6 +1,9 @@
-# DSH ships @deepseek-ai/dsh-mcp-client. This bundle only selects the trusted
-# executable and keeps all Zhihu business logic in the versioned Python package.
+# DSH ships @deepseek-ai/dsh-mcp-client. This bundle keeps Zhihu business
+# logic in the versioned Python package and exposes a package-named wrapper
+# Fiber so Loader can settle dsh-plugin-zhihu-search itself.
 - insert:
+    - id: zhihu-search
+      name: dsh-plugin-zhihu-search
     - id: zhihu-search-mcp
       name: '@deepseek-ai/dsh-mcp-client'
       config:

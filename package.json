@@ -3,7 +3,13 @@
   "version": "1.5.0",
   "description": "GitHub-installable DeepSeek Harness bundle for the zhihu-search MCP server",
   "type": "module",
+  "main": "./dsh-plugin/index.js",
+  "exports": {
+    ".": "./dsh-plugin/index.js",
+    "./package.json": "./package.json"
+  },
   "files": [
+    "dsh-plugin/index.js",
     "dsh-plugin/cordis.patch.yml",
     "dsh-plugin/README.md",
     "LICENSE"

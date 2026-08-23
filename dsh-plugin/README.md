@@ -1,9 +1,11 @@
 # dsh-plugin-zhihu-search
 
 DeepSeek Harness bundle for
-[`zhihu-search`](https://github.com/klarkxy/zhihu-search). It uses DSH's
-built-in MCP client to launch the pinned Python package over stdio; it does
-not duplicate the Python business logic or store credentials in DSH config.
+[`zhihu-search`](https://github.com/klarkxy/zhihu-search). It mounts a
+package-named wrapper Fiber so Loader can settle `dsh-plugin-zhihu-search`,
+then uses DSH's built-in MCP client to launch the pinned Python package
+over stdio. It does not duplicate the Python business logic or store
+credentials in DSH config.
 
 ## Install
 

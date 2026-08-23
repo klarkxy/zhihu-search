@@ -22,7 +22,7 @@ def _manifest() -> dict[str, object]:
     return json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
 
 
-def _plugin_row() -> dict[str, object]:
+def _insert_rows() -> list[dict[str, object]]:
     patch = yaml.safe_load(
         (PLUGIN_DIR / "cordis.patch.yml").read_text(encoding="utf-8")
     )
@@ -30,10 +30,18 @@ def _plugin_row() -> dict[str, object]:
     insert = patch[0]
     assert set(insert) == {"insert"}
     rows = insert["insert"]
-    assert isinstance(rows, list) and len(rows) == 1
-    row = rows[0]
-    assert isinstance(row, dict)
-    return row
+    assert isinstance(rows, list) and len(rows) == 2
+    assert all(isinstance(row, dict) for row in rows)
+    return rows
+
+
+def _row_named(name: str) -> dict[str, object]:
+    rows = {str(row["name"]): row for row in _insert_rows()}
+    return rows[name]
+
+
+def _plugin_row() -> dict[str, object]:
+    return _row_named("@deepseek-ai/dsh-mcp-client")
 
 
 def test_dsh_bundle_manifest_is_git_installable_and_version_locked() -> None:
@@ -45,7 +53,13 @@ def test_dsh_bundle_manifest_is_git_installable_and_version_locked() -> None:
     assert manifest["dsh"] == {
         "bundle": {"patch": "./dsh-plugin/cordis.patch.yml"}
     }
+    assert manifest["main"] == "./dsh-plugin/index.js"
+    assert manifest["exports"] == {
+        ".": "./dsh-plugin/index.js",
+        "./package.json": "./package.json",
+    }
     assert set(manifest["files"]) == {
+        "dsh-plugin/index.js",
         "dsh-plugin/cordis.patch.yml",
         "dsh-plugin/README.md",
         "LICENSE",
@@ -60,6 +74,17 @@ def test_dsh_bundle_manifest_is_git_installable_and_version_locked() -> None:
 
     for filename in manifest["files"]:
         assert (ROOT / filename).is_file()
+
+
+def test_dsh_bundle_exposes_package_named_wrapper_fiber() -> None:
+    wrapper = _row_named("dsh-plugin-zhihu-search")
+    source = (PLUGIN_DIR / "index.js").read_text(encoding="utf-8")
+
+    assert wrapper["id"] == "zhihu-search"
+    assert wrapper["name"] == "dsh-plugin-zhihu-search"
+    assert "config" not in wrapper
+    assert "export const name = 'dsh-plugin-zhihu-search'" in source
+    assert "export function apply() {}" in source
 
 
 def test_dsh_bundle_uses_builtin_mcp_client_and_pinned_python_package() -> None:

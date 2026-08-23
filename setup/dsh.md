@@ -1,8 +1,9 @@
 # DeepSeek Harness
 
-`dsh-plugin-zhihu-search` is a declarative DSH bundle. It inserts DSH's
-built-in `@deepseek-ai/dsh-mcp-client`, which starts the pinned Python MCP
-server over stdio and publishes server-qualified native tools.
+`dsh-plugin-zhihu-search` is a DSH bundle. It inserts a package-named
+wrapper Fiber plus DSH's built-in `@deepseek-ai/dsh-mcp-client`, which
+starts the pinned Python MCP server over stdio and publishes
+server-qualified native tools.
 
 ## Prerequisites
 
@@ -60,7 +61,8 @@ Inspect the composed profile before starting it:
 dsh --profile web --dump-config
 ```
 
-The dump must contain one `zhihu-search-mcp` row using
+The dump must contain one `zhihu-search` row named
+`dsh-plugin-zhihu-search`, plus one `zhihu-search-mcp` row using
 `@deepseek-ai/dsh-mcp-client`, `command: uvx`, the pinned
 `zhihu-search==<version>` package, and `serve --tools compact`. A persistent
 installation requires stopping and restarting the target DSH profile.
