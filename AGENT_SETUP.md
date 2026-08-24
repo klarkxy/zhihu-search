@@ -70,9 +70,10 @@ dsh plugin --profile web add "github:klarkxy/zhihu-search"
 dsh --profile web --dump-config
 ```
 
-配置 dump 必须包含 `zhihu-search-mcp`、`@deepseek-ai/dsh-mcp-client`、
-固定版本的 `zhihu-search` 和 `serve --tools compact`。持久安装后停止并重启
-目标 profile，再确认四个 `mcp__zhihu__...` 工具各出现一次并完成真实查询。
+配置 dump 必须包含 `zhihu-search-skill` 和
+`@deepseek-ai/dsh-skill-filesystem`。持久安装后停止并重启目标 profile，再
+确认 Skill 目录出现 `zhihu-search`，并由 Agent 按需执行
+`uvx zhihu-search` 完成真实查询。不要为了这个 bundle 再注册常驻 MCP。
 插件配置中不得写入任何知乎凭证。完整流程见 [setup/dsh.md](setup/dsh.md)。
 
 ## 3. CLI 作为直接入口

@@ -11,6 +11,18 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_DIR = ROOT / "dsh-plugin"
+SKILL_DIR = ROOT / "skills" / "zhihu-search"
+
+
+class _PatchLoader(yaml.SafeLoader):
+    """Keep `!!js` expressions as raw strings for contract assertions."""
+
+
+def _construct_js(loader: yaml.SafeLoader, node: yaml.Node) -> str:
+    return loader.construct_scalar(node)
+
+
+_PatchLoader.add_constructor("tag:yaml.org,2002:js", _construct_js)
 
 
 def _project_version() -> str:
@@ -23,8 +35,9 @@ def _manifest() -> dict[str, object]:
 
 
 def _plugin_row() -> dict[str, object]:
-    patch = yaml.safe_load(
-        (PLUGIN_DIR / "cordis.patch.yml").read_text(encoding="utf-8")
+    patch = yaml.load(
+        (PLUGIN_DIR / "cordis.patch.yml").read_text(encoding="utf-8"),
+        Loader=_PatchLoader,
     )
     assert isinstance(patch, list) and len(patch) == 1
     insert = patch[0]
@@ -48,6 +61,7 @@ def test_dsh_bundle_manifest_is_git_installable_and_version_locked() -> None:
     assert set(manifest["files"]) == {
         "dsh-plugin/cordis.patch.yml",
         "dsh-plugin/README.md",
+        "skills/zhihu-search",
         "LICENSE",
     }
     assert "publishConfig" not in manifest
@@ -59,35 +73,24 @@ def test_dsh_bundle_manifest_is_git_installable_and_version_locked() -> None:
     assert manifest["engines"] == {"node": "^22.19.0 || >=24.0.0"}
 
     for filename in manifest["files"]:
-        assert (ROOT / filename).is_file()
+        assert (ROOT / filename).exists()
 
 
-def test_dsh_bundle_uses_builtin_mcp_client_and_pinned_python_package() -> None:
+def test_dsh_bundle_mounts_the_shipped_skill_without_mcp() -> None:
     row = _plugin_row()
-    version = _project_version()
 
-    assert row["id"] == "zhihu-search-mcp"
-    assert row["name"] == "@deepseek-ai/dsh-mcp-client"
+    assert row["id"] == "zhihu-search-skill"
+    assert row["name"] == "@deepseek-ai/dsh-skill-filesystem"
     config = row["config"]
-    assert config["serverName"] == "zhihu"
-    assert config["transport"] == "stdio"
-    assert config["command"] == "uvx"
-    assert config["args"] == [
-        "--from",
-        f"zhihu-search=={version}",
-        "zhihu-search",
-        "serve",
-        "--tools",
-        "compact",
-    ]
-    assert config["toolCallTimeoutMs"] == 180000
-    assert config["failOnStartupError"] is True
-    assert config["reconnect"] == {
-        "enabled": True,
-        "initialDelayMs": 500,
-        "maxDelayMs": 30000,
-        "maxAttempts": 10,
-    }
+    assert config["providerName"] == "zhihu-search-skill"
+    assert config["includeDefaultRoots"] is False
+    assert config["watch"] is False
+    bundled_skill_dir = config["bundledSkillDir"]
+    assert isinstance(bundled_skill_dir, str)
+    assert "dsh-plugin-zhihu-search/package.json" in bundled_skill_dir
+    assert "'skills'" in bundled_skill_dir
+    assert (SKILL_DIR / "SKILL.md").is_file()
+    assert (SKILL_DIR / "references" / "setup.md").is_file()
 
 
 def test_dsh_bundle_contains_no_secret_or_install_script() -> None:
@@ -99,6 +102,8 @@ def test_dsh_bundle_contains_no_secret_or_install_script() -> None:
     assert "dependencies" not in manifest
     assert "access_secret" not in serialized
     assert "oauth_token" not in serialized
+    assert "dsh-mcp-client" not in serialized
+    assert "uvx" not in serialized
     assert "env" not in row["config"]
 
 
@@ -129,8 +134,6 @@ def test_documentation_describes_mcp_capability_profiles() -> None:
         ROOT / "setup" / "claude-code.md",
         ROOT / "setup" / "opencode.md",
         ROOT / "setup" / "hanako-agent.md",
-        ROOT / "setup" / "dsh.md",
-        PLUGIN_DIR / "README.md",
         ROOT / "skills" / "zhihu-search" / "SKILL.md",
         ROOT / "skills" / "zhihu-search" / "references" / "setup.md",
     ):

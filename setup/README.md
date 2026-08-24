@@ -4,8 +4,8 @@
 
 | 顺序 | 方式 | 适合场景 |
 |---:|---|---|
-| 1 | DSH 插件 | DeepSeek Harness profile 原生安装 |
-| 2 | Skill | 其他 Agent；主动识别任务，优先 MCP、回退 CLI |
+| 1 | DSH 插件 | DeepSeek Harness；把同一份 Skill 装进 profile |
+| 2 | Skill | 其他 Agent；主动识别任务，按需 CLI，已有 MCP 才复用 |
 | 3 | CLI | 临时调用或脚本 |
 | 4 | MCP | AI 客户端高频使用 |
 | 5 | OpenWebUI | 需要 HTTP 工具服务器 |
@@ -40,8 +40,8 @@ DeepSeek Harness 用户直接把 bundle 安装进目标 profile：
 dsh plugin --profile web add "github:klarkxy/zhihu-search"
 ```
 
-插件不保存密钥，只通过 DSH 自带的 MCP client 启动固定版本的 Python
-服务。完整安装、验证与移除步骤见 [dsh.md](dsh.md)。
+插件不保存密钥，也不启动 MCP。它只把同一份 Skill 挂进 profile，查询仍走
+按需 `uvx zhihu-search`。完整安装、验证与移除步骤见 [dsh.md](dsh.md)。
 
 ## 2. 安装 Skill（推荐）
 

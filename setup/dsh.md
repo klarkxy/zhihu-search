@@ -1,8 +1,9 @@
 # DeepSeek Harness
 
-`dsh-plugin-zhihu-search` is a declarative DSH bundle. It inserts DSH's
-built-in `@deepseek-ai/dsh-mcp-client`, which starts the pinned Python MCP
-server over stdio and publishes server-qualified native tools.
+`dsh-plugin-zhihu-search` is a declarative DSH bundle. It mounts the
+shipped `zhihu-search` Skill into the target profile through DSH's
+`@deepseek-ai/dsh-skill-filesystem`. Queries run as on-demand
+`uvx zhihu-search` commands. The bundle does not start an MCP server.
 
 ## Prerequisites
 
@@ -35,8 +36,8 @@ dsh plugin --profile web add "github:klarkxy/zhihu-search"
 ```
 
 No npm publication or install-time build permission is required: this bundle
-contains only a manifest and a declarative patch, with no `prepare` or other
-package scripts.
+contains only a manifest, a declarative patch, and the Skill files, with no
+`prepare` or other package scripts.
 
 Marketplace and plugin-search tools discover this bundle from the GitHub
 topic [`dsh-plugin`](https://github.com/topics/dsh-plugin), not from
@@ -60,36 +61,35 @@ Inspect the composed profile before starting it:
 dsh --profile web --dump-config
 ```
 
-The dump must contain one `zhihu-search-mcp` row using
-`@deepseek-ai/dsh-mcp-client`, `command: uvx`, the pinned
-`zhihu-search==<version>` package, and `serve --tools compact`. A persistent
-installation requires stopping and restarting the target DSH profile.
+The dump must contain one `zhihu-search-skill` row using
+`@deepseek-ai/dsh-skill-filesystem`, `providerName: zhihu-search-skill`,
+`includeDefaultRoots: false`, and a `bundledSkillDir` that resolves to this
+package's `skills` directory. A persistent installation requires stopping
+and restarting the target DSH profile.
 
 ## Verify the live capability
 
-Wait for these four initial tools to appear exactly once:
-
-- `mcp__zhihu__search`
-- `mcp__zhihu__ask`
-- `mcp__zhihu__trending`
-- `mcp__zhihu__other`
-
-Use a request that expects inspectable sources, for example:
+After restart, the Skill catalog must include `zhihu-search`. Use a request
+that expects inspectable sources, for example:
 
 > 帮我查一下最近主流的 RAG 评测方法，返回两条并附来源链接。
 
-Completion requires a real DSH tool call, a successful matching tool result,
-and a non-empty task answer containing useful links. A successful package
-install or config dump alone is not end-to-end proof.
+Completion requires the agent to load the Skill, run a matching
+`uvx zhihu-search` command, and return a non-empty answer with useful
+links. A successful package install or config dump alone is not end-to-end
+proof.
 
-In compact mode, `other(action="enable")` should reveal twelve additional
-low-frequency tools: five user-data tools, three knowledge-base tools, and
-four PDF/PPT tools. The published bundle stays on compact so the initial
-catalog remains four tools. To keep a capability group always visible,
-change the composed `--tools` argument to `knowledge`, `user`, `office`,
-or `full`; profile names and tool names may be mixed. DSH's MCP client
-owns subprocess shutdown and bounded reconnection; recovered tools must
-not be duplicated.
+If credentials are missing, tell the user to open
+[知乎开放平台个人中心](https://developer.zhihu.com/personal), save the
+Access Secret in their own terminal with `--save-token`, then retry. Never
+ask them to paste the Secret into chat.
+
+Do not register a persistent Zhihu MCP server merely because this bundle is
+installed. Reuse matching MCP tools only when the current catalog already
+exposes them.
+
+If a same-named Skill already exists in the project or user skill roots,
+that nearer copy wins over the bundle-shipped Skill.
 
 ## Update and remove
 
@@ -102,9 +102,10 @@ dsh plugin --profile web remove dsh-plugin-zhihu-search
 commit-pinned installation moves only when it is re-added with a different
 reviewed SHA.
 
-Removal must eliminate the bundle layer and its MCP subprocess after the
-profile restarts. It intentionally preserves the independent Python
-credential file. Remove that only on explicit user request:
+Removal must eliminate the bundle layer and its Skill provider after the
+profile restarts. It intentionally preserves an independently installed
+Skill under `~/.agents/skills` and the Python credential file. Remove the
+credential only on explicit user request:
 
 ```powershell
 uvx zhihu-search --clear-token

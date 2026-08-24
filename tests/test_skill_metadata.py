@@ -150,6 +150,7 @@ def test_setup_reference_has_native_dsh_bundle_installation() -> None:
         in setup
     )
     assert "dsh --profile web --dump-config" in setup
-    assert "@deepseek-ai/dsh-mcp-client" in setup
-    assert "mcp__zhihu__search" in setup
+    assert "@deepseek-ai/dsh-skill-filesystem" in setup
+    assert "zhihu-search-skill" in setup
+    assert "must not start a persistent MCP server" in setup
     assert "never\nadd an Access Secret" in setup

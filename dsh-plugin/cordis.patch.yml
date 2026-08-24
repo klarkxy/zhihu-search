@@ -1,23 +1,11 @@
-# DSH ships @deepseek-ai/dsh-mcp-client. This bundle only selects the trusted
-# executable and keeps all Zhihu business logic in the versioned Python package.
+# Mount the shipped Skill into this profile. Runtime stays on-demand
+# `uvx zhihu-search`; this row does not start an MCP server.
+# Loader baseUrl is the profile directory, so resolve this installed package.
 - insert:
-    - id: zhihu-search-mcp
-      name: '@deepseek-ai/dsh-mcp-client'
+    - id: zhihu-search-skill
+      name: '@deepseek-ai/dsh-skill-filesystem'
       config:
-        serverName: zhihu
-        transport: stdio
-        command: uvx
-        args:
-          - --from
-          - 'zhihu-search==1.5.0'
-          - zhihu-search
-          - serve
-          - --tools
-          - compact
-        toolCallTimeoutMs: 180000
-        failOnStartupError: true
-        reconnect:
-          enabled: true
-          initialDelayMs: 500
-          maxDelayMs: 30000
-          maxAttempts: 10
+        providerName: zhihu-search-skill
+        includeDefaultRoots: false
+        watch: false
+        bundledSkillDir: !!js "process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(new URL('package.json', baseUrl)).resolve('dsh-plugin-zhihu-search/package.json')), 'skills')"

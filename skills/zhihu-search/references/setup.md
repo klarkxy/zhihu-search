@@ -72,11 +72,11 @@ dsh plugin --profile web add "github:klarkxy/zhihu-search"
 dsh --profile web --dump-config
 ```
 
-The composed config must contain one `zhihu-search-mcp` row backed by
-`@deepseek-ai/dsh-mcp-client`, a pinned `zhihu-search` package, and `serve --tools compact`.
-Restart the target profile after a persistent install. DSH exposes the initial tools as
-`mcp__zhihu__search`, `mcp__zhihu__ask`, `mcp__zhihu__trending`, and
-`mcp__zhihu__other`. Keep credentials in the existing per-user Python credential file; never
+The composed config must contain one `zhihu-search-skill` row backed by
+`@deepseek-ai/dsh-skill-filesystem`. Restart the target profile after a persistent install.
+The Skill catalog should then include `zhihu-search`; the agent runs on-demand
+`uvx zhihu-search` and must not start a persistent MCP server merely because this bundle is
+installed. Keep credentials in the existing per-user Python credential file; never
 add an Access Secret to the bundle, profile patch, or chat.
 
 ## Diagnose
