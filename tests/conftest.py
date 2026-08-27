@@ -1,4 +1,4 @@
-"""全局测试配置：隔离配额文件到临时目录，避免影响或依赖真实 ~/.config/zhihu-search/。"""
+"""全局测试配置：隔离凭证目录，避免读取或修改用户真实配置。"""
 
 from __future__ import annotations
 
@@ -8,6 +8,6 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _isolate_quota_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """每个测试用例使用独立的配额目录。"""
+def _isolate_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """每个测试用例使用独立的应用配置目录。"""
     monkeypatch.setenv("ZHIHU_SEARCH_HOME", str(tmp_path))

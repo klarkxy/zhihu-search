@@ -21,7 +21,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import __version__, commands, credentials, formatters
-from .quota import QuotaSnapshot
 from .upstream.http_client import ZhihuRestClient
 
 
@@ -105,6 +104,22 @@ class TrendingRequest(ToolRequest):
     """Trending request parameters."""
 
     limit: int = Field(30, ge=1, le=30, description="返回热榜条数。")
+
+
+class QuotaRequest(ToolRequest):
+    """Official daily quota query."""
+
+    api_ids: list[
+        Literal[
+            "global_search",
+            "zhihu_search",
+            "hot_list",
+            "user_data",
+            "zhida_openai",
+            "knowledge",
+            "tools",
+        ]
+    ] = Field(default_factory=list, description="要查询的官方额度项；空列表返回全部。")
 
 
 class UserContentsRequest(UserDataRequest):
@@ -269,33 +284,7 @@ class ToolResponse(BaseModel):
         description="Markdown text optimized for the model to read.",
     )
     data: Any | None = Field(None, description="Raw upstream payload.")
-    quota: dict | None = Field(None, description="Local quota and circuit-breaker snapshot.")
     error: str | None = Field(None, description="Error message when success is false.")
-
-
-def _quota_to_dict(snapshot: QuotaSnapshot | None) -> dict | None:
-    if snapshot is None:
-        return None
-    return {
-        "by_kind": snapshot.by_kind,
-        "reset_at": snapshot.reset_at,
-        "breakers": {
-            kind: {
-                "state": breaker.state,
-                "remaining_cooldown": breaker.remaining_cooldown,
-            }
-            for kind, breaker in (snapshot.breakers or {}).items()
-        },
-    }
-
-
-def _with_quota(text: str, result: commands.CommandResult) -> str:
-    body = text.rstrip()
-    if body:
-        body += "\n\n"
-    if result.quota is not None:
-        body += result.quota.to_line()
-    return body
 
 
 def _response(
@@ -305,22 +294,17 @@ def _response(
 ) -> ToolResponse:
     if not result.success:
         error = result.error or "未知错误"
-        body = f"[错误] {error}"
-        if result.quota is not None:
-            body += f"\n\n{result.quota.to_line()}"
         return ToolResponse(
             success=False,
             kind=kind,
-            content=body,
-            quota=_quota_to_dict(result.quota),
+            content=f"[错误] {error}",
             error=error,
         )
     return ToolResponse(
         success=True,
         kind=kind,
-        content=_with_quota(content, result),
+        content=content.rstrip(),
         data=result.data if result.data is not None else {},
-        quota=_quota_to_dict(result.quota),
     )
 
 
@@ -389,7 +373,7 @@ def create_app(api_key: str | None = None) -> FastAPI:
         version=__version__,
         description=(
             "知乎开放平台 OpenAPI 工具服务器，提供搜索、直答、热榜、"
-            "用户公开数据、知识库以及 PDF/PPT 异步任务操作。"
+            "官方额度、用户公开数据、知识库以及 PDF/PPT 异步任务操作。"
         ),
         lifespan=lifespan,
     )
@@ -457,6 +441,25 @@ def create_app(api_key: str | None = None) -> FastAPI:
         result = await commands.run_trending(limit=request.limit, client=client)
         content = formatters.format_hot_items(result.data) if result.success else ""
         return _response("trending", result, content)
+
+    @tool_router.post(
+        "/quota",
+        response_model=ToolResponse,
+        operation_id="quota",
+        summary="查询知乎开放平台官方每日额度",
+    )
+    async def quota(request: QuotaRequest | None = None) -> ToolResponse:
+        request = request or QuotaRequest()
+        try:
+            client = _get_client()
+        except credentials.CredentialsError as e:
+            return _credentials_error("quota", e)
+        result = await commands.run_quota(
+            api_ids=request.api_ids or None,
+            client=client,
+        )
+        content = formatters.format_quota(result.data) if result.success else ""
+        return _response("quota", result, content)
 
     @tool_router.post(
         "/user/contents",

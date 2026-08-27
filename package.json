@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-zhihu-search",
-  "version": "1.6.0",
+  "version": "2.0.0",
   "description": "GitHub-installable DeepSeek Harness bundle that mounts the zhihu-search Skill",
   "type": "module",
   "files": [

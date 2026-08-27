@@ -1,7 +1,14 @@
 # zhihu-search
 
-用一个命令调用知乎开放平台：搜索、直答、热榜、用户公开数据、知识库、
-PDF 解析、PPT 生成和 OAuth 辅助流程。
+用一个命令调用知乎开放平台：搜索、直答、热榜、官方额度、用户公开数据、
+知识库、PDF 解析、PPT 生成和 OAuth 辅助流程。
+
+## 2.0 迁移提示
+
+额度现在完全以知乎官方 `GET /api/v1/quota` 为准。`quota` 与 `--quota`
+查询官方总额度、已用额度和剩余额度；本地计数、熔断、`--reset-quota`，以及
+CLI JSON、Python `ApiResult` / `CommandResult`、OpenAPI 响应中的本地
+`quota` 字段均已移除。已有的本机 `quota.json` 不会被删除，但不再读取。
 
 推荐按下面的顺序选择入口：
 
@@ -74,6 +81,7 @@ Access Secret 在
 uvx zhihu-search search "RAG 评测方法" --count 5
 uvx zhihu-search ask "什么是 ReAct Agent？" --model thinking
 uvx zhihu-search trending --limit 10
+uvx zhihu-search quota --api-id knowledge
 ```
 
 用户数据、知识库、PDF、PPT 和 OAuth 也都可以从 CLI 调用：
@@ -117,7 +125,7 @@ args:    zhihu-search serve --tools compact
 | `knowledge` | compact 加 3 个知识库工具 |
 | `user` | compact 加 5 个用户数据工具 |
 | `office` | compact 加 2 个 PDF 和 2 个 PPT 工具 |
-| `full` | 全部 16 个工具 |
+| `full` | 全部 17 个工具 |
 
 档位和工具名可以逗号混写，结果取并集，例如 `knowledge,user` 或
 `compact,knowledge_search`。只写工具名则是严格 allowlist，例如
@@ -125,11 +133,11 @@ args:    zhihu-search serve --tools compact
 
 `other` 管理当前 MCP 会话中的低频工具：
 
-- `enable`：展开 5 个用户数据工具、3 个知识库工具、2 个 PDF 工具和 2 个 PPT 工具。
-- `disable`：收起这 12 个工具。
+- `enable`：展开官方额度、5 个用户数据、3 个知识库、2 个 PDF 和 2 个 PPT 工具。
+- `disable`：收起这 13 个工具。
 - `reset`：恢复启动时的工具集合。
 
-只要选择里出现档位名，`other` 就能管理全部 12 个低频工具；纯工具名的严格
+只要选择里出现档位名，`other` 就能管理全部 13 个低频工具；纯工具名的严格
 allowlist 下，它只能管理列表里已经允许的低频工具，不能越过开关。
 
 也可以用 `ZHIHU_MCP_TOOLS` 设置默认配置；命令行 `--tools` 优先于环境
@@ -190,6 +198,7 @@ uvx zhihu-search openwebui \
 | 能力 | 端点数 | 说明 |
 |---|---:|---|
 | 搜索、直答、热榜 | 4 | 知乎搜索、全网搜索、直答、热榜 |
+| 官方额度 | 1 | 查询各 API 的总额度、已用额度和剩余额度 |
 | 用户公开数据 | 5 | 创作、关注、近期收藏和收藏夹 |
 | 知识库 | 4 | 列表、内容、上传、检索 |
 | PDF 解析 | 3 | 上传、创建任务、查询状态 |
@@ -214,7 +223,8 @@ uvx zhihu-search --clear-token
 ```
 
 `--check-token` 只报告是否已配置及凭证来源，不输出 Secret 片段或本机凭证
-路径；`--probe` 会真实调用一次 `hot_list(limit=1)` 并消耗一次请求额度。
+路径；`--probe` 会真实调用一次 `hot_list(limit=1)` 并消耗一次请求额度；
+`--quota` 调用官方额度接口，查询本身不消耗业务额度，也不再使用本地计数。
 
 常见问题：
 
@@ -222,7 +232,7 @@ uvx zhihu-search --clear-token
 |---|---|
 | 找不到 `uvx` | 安装 uv 后重开终端 |
 | 凭证不存在或失效 | 回个人中心创建并重新保存 Access Secret |
-| `Code=30002` | 到知乎开发者后台检查额度或接口权限 |
+| `Code=30002` | 运行 `--quota` 查看官方剩余额度，再检查接口权限 |
 | MCP 工具未出现 | 检查配置后重启客户端 |
 | PDF/PPT 长时间处理中 | 稍后再查状态，不要紧密轮询 |
 | 知识库列表为空 | 先登录 [直答知识库](https://zhida.zhihu.com/repositories/square) 完成初始化 |

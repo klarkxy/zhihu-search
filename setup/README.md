@@ -75,7 +75,8 @@ uvx zhihu-search serve --tools compact
 ```
 
 compact 只暴露 `search`、`ask`、`trending` 和 `other`。`other` 可在当前
-会话中通过 `enable`、`disable`、`reset` 展开、收起或复原 12 个低频工具。
+会话中通过 `enable`、`disable`、`reset` 展开、收起或复原 13 个低频工具，
+其中包括官方额度查询。
 
 除 `compact` 和 `full` 外，还有 `knowledge`、`user`、`office` 三个档位，
 各自在 compact 基础上常驻一组能力。档位名与工具名可以逗号混写取并集，
@@ -118,7 +119,8 @@ uvx zhihu-search --clear-token
 ```
 
 `--check-token` 只报告是否已配置及凭证来源，不输出 Secret 片段或本机凭证
-路径。`--probe` 会真实调用一次 `hot_list(limit=1)` 并消耗一次请求额度。
+路径。`--probe` 会真实调用一次 `hot_list(limit=1)` 并消耗一次请求额度；
+`--quota` 查询官方额度，本身不消耗业务额度，也不读取本地计数文件。
 
 | 症状 | 处理 |
 |---|---|
@@ -126,4 +128,4 @@ uvx zhihu-search --clear-token
 | 凭证无效 | 重新创建 Access Secret，再执行 `--save-token` |
 | 知乎上游暂不可达 | 稍后重新执行 `--probe` |
 | MCP 工具不符合预期 | 检查 `--tools`、`ZHIHU_MCP_TOOLS` 并重启客户端 |
-| 返回 `Code=30002` | 到知乎开放平台检查账号额度或接口权限 |
+| 返回 `Code=30002` | 运行 `--quota` 查看官方剩余额度，再检查接口权限 |

@@ -3,6 +3,7 @@
 接口规范（参见 https://developer.zhihu.com/docs）：
 
 - 内容能力：知乎搜索、全网搜索、热榜、直答。
+- 账号能力：查询官方每日额度。
 - 用户能力：创作内容、关注、近期收藏、收藏夹及收藏夹内容。
 - 知识库能力：列表、内容、文件上传与 RAG 检索。
 - 文件能力：PDF 上传与解析任务。
@@ -13,7 +14,7 @@
     X-Request-Timestamp: <秒级 unix 时间戳>
     Content-Type: application/json
 
-公共响应信封（搜索、热榜）：``{Code, Message, Data}``
+公共响应信封（除直答外的 REST 接口）：``{Code, Message, Data}``
 直答响应：OpenAI Chat Completion 兼容格式。
 """
 
@@ -37,8 +38,6 @@ from .base import (
     UpstreamUnavailable,
     parse_retry_after,
 )
-from ..quota import QuotaKind, QuotaSnapshot, QuotaTracker
-
 
 BASE_URL = "https://developer.zhihu.com"
 
@@ -67,6 +66,15 @@ UserSortField = Literal["like_count", "ts"]
 SortOrder = Literal["asc", "desc"]
 KnowledgeScope = Literal["all", "created", "subscribed"]
 KnowledgeRecallScope = Literal["personal", "subscription", "public"]
+OfficialQuotaId = Literal[
+    "global_search",
+    "zhihu_search",
+    "hot_list",
+    "user_data",
+    "zhida_openai",
+    "knowledge",
+    "tools",
+]
 
 # 各接口的参数上下界
 ZHIHU_SEARCH_MAX = 10
@@ -81,6 +89,15 @@ KNOWLEDGE_FILENAME_MAX_BYTES = 255
 QUERY_MIN = 2
 QUERY_MAX = 100
 INT64_MAX = (1 << 63) - 1
+OFFICIAL_QUOTA_IDS: tuple[OfficialQuotaId, ...] = (
+    "global_search",
+    "zhihu_search",
+    "hot_list",
+    "user_data",
+    "zhida_openai",
+    "knowledge",
+    "tools",
+)
 
 DEFAULT_TIMEOUT = 30.0
 ZHIDA_TIMEOUT = 120.0  # agent 模型可能慢
@@ -148,19 +165,18 @@ _PPT_TASK_ID = re.compile(r"^ppt_[A-Za-z0-9_-]+$")
 
 @dataclass
 class ApiResult:
-    """一次调用后的完整结果：业务数据 + 配额快照。
+    """一次调用后的完整结果：业务数据 + 响应头。
 
     ``headers`` 里如果知乎返回了限流相关头（X-RateLimit-* 等），
     会原样带上，方便上层透传给用户。
     """
 
     data: Any
-    quota: QuotaSnapshot
     headers: dict[str, str]
 
 
 class ZhihuRestClient:
-    """一个实例覆盖知乎开放平台数据接口，共享连接池与配额计数。"""
+    """一个实例覆盖知乎开放平台数据接口并共享连接池。"""
 
     def __init__(
         self,
@@ -168,7 +184,6 @@ class ZhihuRestClient:
         *,
         timeout: float = DEFAULT_TIMEOUT,
         client: Optional[httpx.AsyncClient] = None,
-        quota_tracker: Optional[QuotaTracker] = None,
     ) -> None:
         self._access_secret = access_secret
         self._timeout = timeout
@@ -176,7 +191,6 @@ class ZhihuRestClient:
             timeout=timeout, base_url=BASE_URL
         )
         self._owns_client = client is None
-        self._quota = quota_tracker or QuotaTracker()
 
     # ------------------------------------------------------------------
     # 公共：构造请求 / 解析响应
@@ -207,7 +221,6 @@ class ZhihuRestClient:
         path: str,
         params: dict[str, Any],
         *,
-        kind: QuotaKind = "search",
         timeout: float | None = None,
         oauth_token: str | None = None,
     ) -> ApiResult:
@@ -222,14 +235,13 @@ class ZhihuRestClient:
             raise UpstreamTimeout(f"{path} 请求超时") from exc
         except httpx.HTTPError as exc:
             raise UpstreamUnavailable(f"{path} 网络错误：{exc}") from exc
-        return self._parse_envelope(resp, path, kind=kind)
+        return self._parse_envelope(resp, path)
 
     async def _envelope_post(
         self,
         path: str,
         body: dict[str, Any],
         *,
-        kind: QuotaKind = "search",
         timeout: float | None = None,
         idempotency_key: str | None = None,
     ) -> ApiResult:
@@ -244,14 +256,12 @@ class ZhihuRestClient:
             raise UpstreamTimeout(f"{path} 请求超时") from exc
         except httpx.HTTPError as exc:
             raise UpstreamUnavailable(f"{path} 网络错误：{exc}") from exc
-        return self._parse_envelope(resp, path, kind=kind)
+        return self._parse_envelope(resp, path)
 
     def _parse_envelope(
         self,
         resp: httpx.Response,
         path: str,
-        *,
-        kind: QuotaKind = "search",
     ) -> ApiResult:
         """解析 ``{Code, Message, Data}`` 信封。直答走 OpenAI 格式，单独处理。"""
         # HTTP 层错误
@@ -301,22 +311,24 @@ class ZhihuRestClient:
             err_cls = _CODE_TO_ERROR.get(numeric_code, UpstreamUnavailable)
             msg = body.get("Message") or "未知错误"
             if err_cls is RateLimited:
-                raise RateLimited(f"{path} 限流：{msg}")
+                retry = parse_retry_after(resp.headers.get("Retry-After"))
+                raise RateLimited(
+                    f"{path} 限流：{msg}",
+                    retry_after=retry,
+                )
             if err_cls is TokenInvalid:
                 raise TokenInvalid()
             if err_cls is InvalidArguments:
                 raise InvalidArguments(f"{path} 参数错误：{msg}")
             raise UpstreamUnavailable(f"{path} 返回错误 {numeric_code}：{msg}")
 
-        quota = self._quota.increment(kind)
         return ApiResult(
             data=body.get("Data", {}),
-            quota=quota,
             headers={k: v for k, v in resp.headers.items()},
         )
 
     # ------------------------------------------------------------------
-    # 4 个业务接口
+    # 核心与账号接口
     # ------------------------------------------------------------------
 
     async def zhihu_search(
@@ -332,7 +344,6 @@ class ZhihuRestClient:
         return await self._envelope_get(
             "/api/v1/content/zhihu_search",
             {"Query": query, "Count": count},
-            kind="search",
         )
 
     async def global_search(
@@ -348,17 +359,35 @@ class ZhihuRestClient:
         params: dict[str, Any] = {"Query": query, "Count": count, "SearchDB": search_db}
         if filter:
             params["Filter"] = filter
-        return await self._envelope_get(
-            "/api/v1/content/global_search", params, kind="search"
-        )
+        return await self._envelope_get("/api/v1/content/global_search", params)
 
     async def hot_list(self, limit: int = 30) -> ApiResult:
         """知乎热榜。limit 不在 1-30 时回退默认值 30。"""
         if limit <= 0 or limit > HOT_LIST_MAX:
             limit = HOT_LIST_MAX
         return await self._envelope_get(
-            "/api/v1/content/hot_list", {"Limit": limit}, kind="trending"
+            "/api/v1/content/hot_list", {"Limit": limit}
         )
+
+    async def quota(
+        self,
+        api_ids: list[OfficialQuotaId] | None = None,
+    ) -> ApiResult:
+        """查询当前 Access Secret 的官方自然日额度。
+
+        该接口本身不消耗业务额度。``api_ids`` 为空时返回全部可展示额度项。
+        """
+        params: dict[str, Any] = {}
+        if api_ids:
+            unknown = [
+                api_id for api_id in api_ids if api_id not in OFFICIAL_QUOTA_IDS
+            ]
+            if unknown:
+                raise InvalidArguments(
+                    "未知官方额度项：" + ", ".join(dict.fromkeys(unknown))
+                )
+            params["APIIDs"] = ",".join(dict.fromkeys(api_ids))
+        return await self._envelope_get("/api/v1/quota", params)
 
     # ------------------------------------------------------------------
     # 用户数据接口
@@ -402,7 +431,6 @@ class ZhihuRestClient:
                 "SortField": sort_field,
                 "SortOrder": sort_order,
             },
-            kind="user",
             oauth_token=oauth_token,
         )
 
@@ -419,7 +447,6 @@ class ZhihuRestClient:
         return await self._envelope_get(
             "/api/v1/user/followees",
             {"Offset": offset, "Limit": limit},
-            kind="user",
             oauth_token=oauth_token,
         )
 
@@ -434,7 +461,6 @@ class ZhihuRestClient:
         return await self._envelope_get(
             "/api/v1/user/collections",
             {"Limit": limit},
-            kind="user",
             oauth_token=oauth_token,
         )
 
@@ -449,7 +475,6 @@ class ZhihuRestClient:
         return await self._envelope_get(
             "/api/v1/user/favlists",
             {"Limit": limit},
-            kind="user",
             oauth_token=oauth_token,
         )
 
@@ -485,7 +510,6 @@ class ZhihuRestClient:
         return await self._envelope_get(
             "/api/v1/user/favlist_contents",
             params,
-            kind="user",
             oauth_token=oauth_token,
         )
 
@@ -504,7 +528,6 @@ class ZhihuRestClient:
         return await self._envelope_get(
             "/api/v1/knowledge/bases",
             {"Scope": scope},
-            kind="knowledge",
         )
 
     async def knowledge_items(
@@ -525,7 +548,6 @@ class ZhihuRestClient:
         return await self._envelope_get(
             f"/api/v1/knowledge/bases/{encoded_id}/items",
             params,
-            kind="knowledge",
         )
 
     async def upload_knowledge_file(
@@ -590,9 +612,7 @@ class ZhihuRestClient:
             ) from exc
         except OSError as exc:
             raise InvalidArguments(f"读取知识库文件失败：{path}") from exc
-        return self._parse_envelope(
-            resp, "/api/v1/knowledge/files", kind="knowledge"
-        )
+        return self._parse_envelope(resp, "/api/v1/knowledge/files")
 
     async def knowledge_search(
         self,
@@ -624,7 +644,6 @@ class ZhihuRestClient:
         return await self._envelope_post(
             "/api/v1/knowledge/search",
             body,
-            kind="knowledge",
         )
 
     # ------------------------------------------------------------------
@@ -667,9 +686,7 @@ class ZhihuRestClient:
             ) from exc
         except OSError as exc:
             raise InvalidArguments(f"读取 PDF 文件失败：{path}") from exc
-        return self._parse_envelope(
-            resp, "/resources/v1/files", kind="pdf"
-        )
+        return self._parse_envelope(resp, "/resources/v1/files")
 
     async def create_pdf_parse_task(
         self,
@@ -682,7 +699,6 @@ class ZhihuRestClient:
         return await self._envelope_post(
             "/api/v1/pdf-parse/tasks",
             {"file_id": file_id},
-            kind="pdf",
             idempotency_key=idempotency_key,
         )
 
@@ -692,7 +708,6 @@ class ZhihuRestClient:
         return await self._envelope_get(
             f"/api/v1/pdf-parse/tasks/{task_id}",
             {},
-            kind="pdf",
         )
 
     async def create_ppt_generation_task(
@@ -713,7 +728,6 @@ class ZhihuRestClient:
         return await self._envelope_post(
             "/api/v1/ppt-generation/tasks",
             {"resource_url": resource_url, "num_pages": num_pages},
-            kind="ppt",
             idempotency_key=idempotency_key,
         )
 
@@ -723,7 +737,6 @@ class ZhihuRestClient:
         return await self._envelope_get(
             f"/api/v1/ppt-generation/tasks/{task_id}",
             {},
-            kind="ppt",
         )
 
     async def zhida(
@@ -802,10 +815,8 @@ class ZhihuRestClient:
             "finish_reason": choices[0].get("finish_reason"),
         }
 
-        quota = self._quota.increment("ask")
         return ApiResult(
             data=normalized,
-            quota=quota,
             headers={k: v for k, v in resp.headers.items()},
         )
 
@@ -822,10 +833,6 @@ class ZhihuRestClient:
 
     async def __aexit__(self, *exc_info: object) -> None:
         await self.aclose()
-
-    @property
-    def quota_tracker(self) -> QuotaTracker:
-        return self._quota
 
     # ------------------------------------------------------------------
     # helpers

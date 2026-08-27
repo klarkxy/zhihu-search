@@ -4,14 +4,12 @@
     search   → 知乎搜索 (scope=zhihu) 或 全网搜索 (scope=web)
     ask      → 直答（OpenAI 兼容 chat completions）
     trending → 热榜
+    quota    → 知乎开放平台官方每日额度
     user_*   → 用户公开内容、关注与收藏
     knowledge_* → 知识库列表、内容与检索（上传留在本机 CLI）
     pdf_*    → PDF 解析任务创建/查询（上传留在本机 CLI）
     ppt_*    → PPT 生成任务创建/查询
     other    → 按当前会话展开、收起或重置上述低频工具
-
-每次返回的内容末尾会附加一行当日配额进度，让 agent / 用户随时看到
-还能调用多少次。
 
 本模块只做「MCP 协议适配」一件事；业务逻辑在 commands.py，格式化在 formatters.py。
 """
@@ -28,7 +26,6 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from . import commands, credentials, formatters
-from .quota import QuotaTracker
 from .upstream.base import McpError
 from .upstream.http_client import ZhihuRestClient
 
@@ -104,8 +101,12 @@ OFFICE_MCP_TOOL_NAMES = frozenset(
         "ppt_status",
     }
 )
+ACCOUNT_MCP_TOOL_NAMES = frozenset({"quota"})
 OPTIONAL_MCP_TOOL_NAMES = (
-    USER_MCP_TOOL_NAMES | KNOWLEDGE_MCP_TOOL_NAMES | OFFICE_MCP_TOOL_NAMES
+    USER_MCP_TOOL_NAMES
+    | KNOWLEDGE_MCP_TOOL_NAMES
+    | OFFICE_MCP_TOOL_NAMES
+    | ACCOUNT_MCP_TOOL_NAMES
 )
 ALL_MCP_TOOL_NAMES = CORE_MCP_TOOL_NAMES | OPTIONAL_MCP_TOOL_NAMES
 MCP_TOOL_PROFILES = {
@@ -221,28 +222,18 @@ async def aclose_all() -> None:
 
 def _ok(
     text: str,
-    quota: commands.CommandResult | QuotaTracker | None = None,
+    _result: commands.CommandResult | None = None,
 ) -> ToolResult:
-    """正常返回：业务文本 + 配额提示。"""
-    body = text.rstrip()
-    if body:
-        body += "\n\n"
-    if isinstance(quota, commands.CommandResult) and quota.quota is not None:
-        body += quota.quota.to_line()
-    elif isinstance(quota, QuotaTracker):
-        body += quota.snapshot().to_line()
-    return ToolResult(content=body, is_error=False)
+    """正常返回业务文本。"""
+    return ToolResult(content=text.rstrip(), is_error=False)
 
 
 def _err(
     message: str,
-    quota: commands.CommandResult | None = None,
+    _result: commands.CommandResult | None = None,
 ) -> ToolResult:
-    """错误返回：错误文本 + 配额提示（如果能拿到）。"""
-    text = f"[错误] {message}"
-    if quota is not None and quota.quota is not None:
-        text += f"\n\n{quota.quota.to_line()}"
-    return ToolResult(content=text, is_error=True)
+    """错误返回。"""
+    return ToolResult(content=f"[错误] {message}", is_error=True)
 
 
 # ----------------------------------------------------------------------
@@ -346,6 +337,42 @@ async def trending(
     if not result.success:
         return _err(result.error or "未知错误", result)
     return _ok(formatters.format_hot_items(result.data), result)
+
+
+@mcp.tool(
+    name="quota",
+    title="知乎开放平台每日额度",
+    description=(
+        "查询当前 Access Secret 在自然日内的官方总额度、已用额度和剩余额度。"
+        "不传 api_ids 时返回全部额度项；查询本身不消耗业务额度。"
+    ),
+    annotations=CORE_READ_ONLY_ANNOTATIONS,
+)
+async def quota(
+    api_ids: Annotated[
+        list[
+            Literal[
+                "global_search",
+                "zhihu_search",
+                "hot_list",
+                "user_data",
+                "zhida_openai",
+                "knowledge",
+                "tools",
+            ]
+        ]
+        | None,
+        Field(description="要查询的官方额度项；省略则返回全部。"),
+    ] = None,
+) -> ToolResult:
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
+    result = await commands.run_quota(api_ids=api_ids, client=client)
+    if not result.success:
+        return _err(result.error or "未知错误", result)
+    return _ok(formatters.format_quota(result.data), result)
 
 
 @mcp.tool(

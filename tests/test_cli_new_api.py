@@ -47,6 +47,23 @@ def test_parser_accepts_mcp_tool_profile() -> None:
     assert args.tools == "search,other"
 
 
+def test_parser_accepts_official_quota_filter() -> None:
+    args = cli._build_parser().parse_args(
+        [
+            "quota",
+            "--api-id",
+            "knowledge",
+            "--api-id",
+            "tools",
+            "--format",
+            "json",
+        ]
+    )
+    assert args.command == "quota"
+    assert args.api_ids == ["knowledge", "tools"]
+    assert args.format == "json"
+
+
 def test_install_skill_defaults_to_global_codex(capsys) -> None:
     with (
         patch.object(cli.shutil, "which", return_value="npx.cmd"),
@@ -237,6 +254,46 @@ def test_user_contents_json_dispatch(capsys) -> None:
     assert kwargs["content_type"] == "answer"
     assert kwargs["offset"] == "20"
     assert kwargs["oauth_token"] == "oauth-x"
+
+
+def test_quota_json_dispatch_uses_official_endpoint(capsys) -> None:
+    run_quota = AsyncMock(
+        return_value=CommandResult(
+            success=True,
+            data=[
+                {
+                    "APIID": "knowledge",
+                    "APIName": "知识库",
+                    "TotalQuota": 500,
+                    "TotalUsed": 12,
+                    "RemainingQuota": 488,
+                }
+            ],
+        )
+    )
+    with patch.object(cli.commands, "run_quota", new=run_quota):
+        exit_code = cli.main(
+            ["quota", "--api-id", "knowledge", "--format", "json"]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "quota"
+    assert payload["data"][0]["RemainingQuota"] == 488
+    assert "quota" not in payload
+    run_quota.assert_awaited_once_with(api_ids=["knowledge"])
+
+
+def test_legacy_quota_flag_now_queries_official_quota(capsys) -> None:
+    run_quota = AsyncMock(
+        return_value=CommandResult(success=True, data=[])
+    )
+    with patch.object(cli.commands, "run_quota", new=run_quota):
+        exit_code = cli.main(["--quota"])
+
+    assert exit_code == 0
+    assert "官方额度列表为空" in capsys.readouterr().out
+    run_quota.assert_awaited_once_with()
 
 
 def test_knowledge_upload_dispatches_local_path(capsys) -> None:

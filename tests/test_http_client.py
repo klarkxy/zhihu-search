@@ -10,7 +10,6 @@ import httpx
 import pytest
 import respx
 
-from zhihu_search.quota import QuotaTracker
 from zhihu_search.upstream.base import (
     InvalidArguments,
     RateLimited,
@@ -21,6 +20,7 @@ from zhihu_search.upstream.base import (
 from zhihu_search.upstream.http_client import (
     GLOBAL_SEARCH_MAX,
     HOT_LIST_MAX,
+    OFFICIAL_QUOTA_IDS,
     PDF_MAX_BYTES,
     USER_PAGE_MAX,
     ZHIHU_SEARCH_MAX,
@@ -31,10 +31,6 @@ from zhihu_search.upstream.http_client import (
 
 SECRET = "zh1_testsecrettestsecr"
 
-
-@pytest.fixture
-def tracker(tmp_path):
-    return QuotaTracker(base_dir=tmp_path)
 
 
 def _envelope(code: int = 0, data: dict | None = None, message: str = "success") -> dict:
@@ -47,7 +43,7 @@ def _envelope(code: int = 0, data: dict | None = None, message: str = "success")
 
 
 @pytest.mark.asyncio
-async def test_zhihu_search_success(tracker) -> None:
+async def test_zhihu_search_success() -> None:
     with respx.mock(assert_all_called=False) as router:
         router.get(f"{BASE_URL}/api/v1/content/zhihu_search").mock(
             return_value=httpx.Response(
@@ -72,18 +68,14 @@ async def test_zhihu_search_success(tracker) -> None:
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             result = await c.zhihu_search(query="RAG", count=5)
 
     assert result.data["Items"][0]["Title"] == "RAG 评测方法综述"
-    assert result.quota.by_kind["search"]["used"] == 1
-    # 其它桶不应被计入
-    assert result.quota.by_kind["trending"]["used"] == 0
-    assert result.quota.by_kind["ask"]["used"] == 0
 
 
 @pytest.mark.asyncio
-async def test_zhihu_search_count_clamped(tracker) -> None:
+async def test_zhihu_search_count_clamped() -> None:
     """count > 最大值时会被服务端截断，我们这里只发出去，校验截断在客户端层不做。
 
     服务器会自己截断到 10，我们的代码负责发送。
@@ -92,7 +84,7 @@ async def test_zhihu_search_count_clamped(tracker) -> None:
         route = router.get(f"{BASE_URL}/api/v1/content/zhihu_search").mock(
             return_value=httpx.Response(200, json=_envelope(data={"Items": []}))
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             await c.zhihu_search(query="RAG", count=999)
         # 校验实际发出去的 URL 参数中 Count 被截断
         request = route.calls.last.request
@@ -102,7 +94,7 @@ async def test_zhihu_search_count_clamped(tracker) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("count", [0, -1])
 async def test_zhihu_search_nonpositive_count_uses_default(
-    tracker, count: int
+    count: int
 ) -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(
@@ -112,7 +104,7 @@ async def test_zhihu_search_nonpositive_count_uses_default(
                 200, json=_envelope(data={"Items": []})
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             await c.zhihu_search(query="RAG", count=count)
     assert route.calls.last.request.url.params["Count"] == str(
         ZHIHU_SEARCH_MAX
@@ -120,8 +112,8 @@ async def test_zhihu_search_nonpositive_count_uses_default(
 
 
 @pytest.mark.asyncio
-async def test_zhihu_search_invalid_query(tracker) -> None:
-    async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+async def test_zhihu_search_invalid_query() -> None:
+    async with ZhihuRestClient(SECRET) as c:
         with pytest.raises(InvalidArguments):
             await c.zhihu_search(query="x")
         with pytest.raises(InvalidArguments):
@@ -134,12 +126,12 @@ async def test_zhihu_search_invalid_query(tracker) -> None:
 
 
 @pytest.mark.asyncio
-async def test_global_search_with_filter(tracker) -> None:
+async def test_global_search_with_filter() -> None:
     with respx.mock(assert_all_called=False) as router:
         route = router.get(f"{BASE_URL}/api/v1/content/global_search").mock(
             return_value=httpx.Response(200, json=_envelope(data={"Items": []}))
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             await c.global_search(
                 query="AI",
                 count=15,
@@ -150,18 +142,16 @@ async def test_global_search_with_filter(tracker) -> None:
         assert request.url.params["Filter"] == 'host=="example.com"'
         assert request.url.params["SearchDB"] == "realtime"
         assert request.url.params["Count"] == "15"
-    # 全网搜索与知乎站内搜索共用 search 桶
-    assert tracker.snapshot().by_kind["search"]["used"] == 1
 
 
 @pytest.mark.asyncio
-async def test_global_search_omits_empty_filter(tracker) -> None:
+async def test_global_search_omits_empty_filter() -> None:
     """filter 为空时不应该出现在 URL 里。"""
     with respx.mock(assert_all_called=False) as router:
         route = router.get(f"{BASE_URL}/api/v1/content/global_search").mock(
             return_value=httpx.Response(200, json=_envelope(data={"Items": []}))
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             await c.global_search(query="AI")
         request = route.calls.last.request
         assert "Filter" not in request.url.params
@@ -173,7 +163,7 @@ async def test_global_search_omits_empty_filter(tracker) -> None:
 
 
 @pytest.mark.asyncio
-async def test_hot_list(tracker) -> None:
+async def test_hot_list() -> None:
     with respx.mock(assert_all_called=False) as router:
         router.get(f"{BASE_URL}/api/v1/content/hot_list").mock(
             return_value=httpx.Response(
@@ -193,20 +183,18 @@ async def test_hot_list(tracker) -> None:
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             result = await c.hot_list(limit=10)
     assert result.data["Items"][0]["Title"] == "热点 1"
-    assert result.quota.by_kind["trending"]["used"] == 1
-    assert result.quota.by_kind["search"]["used"] == 0
 
 
 @pytest.mark.asyncio
-async def test_hot_list_clamped(tracker) -> None:
+async def test_hot_list_clamped() -> None:
     with respx.mock(assert_all_called=False) as router:
         route = router.get(f"{BASE_URL}/api/v1/content/hot_list").mock(
             return_value=httpx.Response(200, json=_envelope(data={"Items": []}))
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             await c.hot_list(limit=999)
         assert route.calls.last.request.url.params["Limit"] == str(HOT_LIST_MAX)
 
@@ -214,7 +202,7 @@ async def test_hot_list_clamped(tracker) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("limit", [0, -1])
 async def test_hot_list_nonpositive_limit_uses_default(
-    tracker, limit: int
+    limit: int,
 ) -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE_URL}/api/v1/content/hot_list").mock(
@@ -222,9 +210,60 @@ async def test_hot_list_nonpositive_limit_uses_default(
                 200, json=_envelope(data={"Items": []})
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             await c.hot_list(limit=limit)
     assert route.calls.last.request.url.params["Limit"] == str(HOT_LIST_MAX)
+
+
+# ----------------------------------------------------------------------
+# 官方每日额度
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_quota_contract_and_api_id_filter() -> None:
+    quota_items = [
+        {
+            "APIID": "knowledge",
+            "APIName": "知识库",
+            "TotalQuota": 9_223_372_036_854_775_000,
+            "TotalUsed": 12,
+            "RemainingQuota": 9_223_372_036_854_774_988,
+        }
+    ]
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(f"{BASE_URL}/api/v1/quota").mock(
+            return_value=httpx.Response(200, json=_envelope(data=quota_items))
+        )
+        async with ZhihuRestClient(SECRET) as c:
+            result = await c.quota(api_ids=["knowledge", "tools", "knowledge"])
+
+    request = route.calls.last.request
+    assert request.url.params["APIIDs"] == "knowledge,tools"
+    assert request.headers["Authorization"] == f"Bearer {SECRET}"
+    assert request.headers["X-Request-Timestamp"].isdigit()
+    assert result.data == quota_items
+    assert isinstance(result.data[0]["TotalQuota"], int)
+
+
+@pytest.mark.asyncio
+async def test_quota_without_filter_omits_api_ids() -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(f"{BASE_URL}/api/v1/quota").mock(
+            return_value=httpx.Response(200, json=_envelope(data=[]))
+        )
+        async with ZhihuRestClient(SECRET) as c:
+            await c.quota()
+
+    assert "APIIDs" not in route.calls.last.request.url.params
+
+
+@pytest.mark.asyncio
+async def test_quota_rejects_unknown_api_id_before_request() -> None:
+    assert "knowledge" in OFFICIAL_QUOTA_IDS
+    async with ZhihuRestClient(SECRET) as c:
+        with pytest.raises(InvalidArguments, match="未知官方额度项"):
+            await c.quota(api_ids=["unknown"])  # type: ignore[list-item]
 
 
 # ----------------------------------------------------------------------
@@ -233,7 +272,7 @@ async def test_hot_list_nonpositive_limit_uses_default(
 
 
 @pytest.mark.asyncio
-async def test_zhida_success(tracker) -> None:
+async def test_zhida_success() -> None:
     with respx.mock(assert_all_called=False) as router:
         router.post(f"{BASE_URL}/v1/chat/completions").mock(
             return_value=httpx.Response(
@@ -255,16 +294,14 @@ async def test_zhida_success(tracker) -> None:
                 },
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             result = await c.zhida(query="什么是 rave 文化")
     assert "Rave 文化最早在英国兴起" in result.data["content"]
     assert result.data["reasoning_content"] == "先分析背景..."
-    assert result.quota.by_kind["ask"]["used"] == 1
-    assert result.quota.by_kind["search"]["used"] == 0
 
 
 @pytest.mark.asyncio
-async def test_zhida_error_response(tracker) -> None:
+async def test_zhida_error_response() -> None:
     with respx.mock(assert_all_called=False) as router:
         router.post(f"{BASE_URL}/v1/chat/completions").mock(
             return_value=httpx.Response(
@@ -272,12 +309,10 @@ async def test_zhida_error_response(tracker) -> None:
                 json={"error": {"message": "bad model", "type": "invalid_request_error"}},
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             with pytest.raises(UpstreamUnavailable) as exc_info:
                 await c.zhida(query="x")
     assert "bad model" in str(exc_info.value)
-    # 失败调用不计入配额
-    assert tracker.snapshot().by_kind["ask"]["used"] == 0
 
 
 # ----------------------------------------------------------------------
@@ -286,30 +321,26 @@ async def test_zhida_error_response(tracker) -> None:
 
 
 @pytest.mark.asyncio
-async def test_token_invalid_401(tracker) -> None:
+async def test_token_invalid_401() -> None:
     with respx.mock(assert_all_called=False) as router:
         router.get(f"{BASE_URL}/api/v1/content/hot_list").mock(
             return_value=httpx.Response(401, text="Unauthorized")
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             with pytest.raises(TokenInvalid):
                 await c.hot_list()
-    # 401 不计入配额
-    assert tracker.snapshot().by_kind["trending"]["used"] == 0
 
 
 @pytest.mark.asyncio
-async def test_rate_limited_envelope(tracker) -> None:
+async def test_rate_limited_envelope() -> None:
     """响应信封 Code=30001 也算限流。"""
     with respx.mock(assert_all_called=False) as router:
         router.get(f"{BASE_URL}/api/v1/content/hot_list").mock(
             return_value=httpx.Response(200, json=_envelope(code=30001, message="触发限流"))
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             with pytest.raises(RateLimited):
                 await c.hot_list()
-    # 限流失败不计入配额
-    assert tracker.snapshot().by_kind["trending"]["used"] == 0
 
 
 # ----------------------------------------------------------------------
@@ -318,7 +349,7 @@ async def test_rate_limited_envelope(tracker) -> None:
 
 
 @pytest.mark.asyncio
-async def test_user_contents_contract_and_oauth_header(tracker) -> None:
+async def test_user_contents_contract_and_oauth_header() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE_URL}/api/v1/user/contents").mock(
             return_value=httpx.Response(
@@ -346,7 +377,7 @@ async def test_user_contents_contract_and_oauth_header(tracker) -> None:
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             result = await c.user_contents(
                 content_type="answer",
                 offset="cursor-20",
@@ -368,7 +399,6 @@ async def test_user_contents_contract_and_oauth_header(tracker) -> None:
     assert request.headers["Authorization"] == f"Bearer {SECRET}"
     assert request.headers["X-Request-Timestamp"].isdigit()
     assert result.data["Paging"]["NextOffset"] == "cursor-20"
-    assert result.quota.by_kind["user"]["used"] == 1
 
 
 @pytest.mark.asyncio
@@ -385,16 +415,15 @@ async def test_user_contents_contract_and_oauth_header(tracker) -> None:
     ],
 )
 async def test_user_contents_rejects_invalid_documented_values(
-    tracker, kwargs
+    kwargs
 ) -> None:
-    async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+    async with ZhihuRestClient(SECRET) as c:
         with pytest.raises(InvalidArguments):
             await c.user_contents(**kwargs)
-    assert tracker.snapshot().by_kind["user"]["used"] == 0
 
 
 @pytest.mark.asyncio
-async def test_user_followees_accepts_string_offset(tracker) -> None:
+async def test_user_followees_accepts_string_offset() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE_URL}/api/v1/user/followees").mock(
             return_value=httpx.Response(
@@ -420,7 +449,7 @@ async def test_user_followees_accepts_string_offset(tracker) -> None:
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             result = await c.user_followees(offset="20", limit=25)
 
     request = route.calls.last.request
@@ -439,7 +468,7 @@ async def test_user_followees_accepts_string_offset(tracker) -> None:
     ],
 )
 async def test_user_limit_only_operations(
-    tracker, method_name: str, path: str
+    method_name: str, path: str
 ) -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE_URL}{path}").mock(
@@ -447,7 +476,7 @@ async def test_user_limit_only_operations(
                 200, json=_envelope(data={"Items": []})
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             method = getattr(c, method_name)
             await method(limit=51, oauth_token="oauth-token")
 
@@ -465,7 +494,7 @@ async def test_user_limit_only_operations(
     ],
 )
 async def test_favlist_contents_identifier_contract(
-    tracker, identifier: dict[str, int], expected_param: str
+    identifier: dict[str, int], expected_param: str
 ) -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(
@@ -484,7 +513,7 @@ async def test_favlist_contents_identifier_contract(
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             await c.favlist_contents(
                 **identifier,
                 offset="next-page",
@@ -517,9 +546,9 @@ async def test_favlist_contents_identifier_contract(
     ],
 )
 async def test_favlist_contents_rejects_invalid_identifiers(
-    tracker, kwargs
+    kwargs
 ) -> None:
-    async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+    async with ZhihuRestClient(SECRET) as c:
         with pytest.raises(InvalidArguments):
             await c.favlist_contents(**kwargs)
 
@@ -530,7 +559,7 @@ async def test_favlist_contents_rejects_invalid_identifiers(
 
 
 @pytest.mark.asyncio
-async def test_knowledge_bases_contract(tracker) -> None:
+async def test_knowledge_bases_contract() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(f"{BASE_URL}/api/v1/knowledge/bases").mock(
             return_value=httpx.Response(
@@ -552,16 +581,15 @@ async def test_knowledge_bases_contract(tracker) -> None:
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             result = await c.knowledge_bases(scope="created")
 
     assert dict(route.calls.last.request.url.params) == {"Scope": "created"}
     assert result.data["Items"][0]["KnowledgeBaseID"] == "7526139256098382426"
-    assert result.quota.by_kind["knowledge"]["used"] == 1
 
 
 @pytest.mark.asyncio
-async def test_knowledge_items_passes_opaque_cursor(tracker) -> None:
+async def test_knowledge_items_passes_opaque_cursor() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.get(
             f"{BASE_URL}/api/v1/knowledge/bases/7526139256098382426/items"
@@ -578,7 +606,7 @@ async def test_knowledge_items_passes_opaque_cursor(tracker) -> None:
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             result = await c.knowledge_items(
                 "7526139256098382426",
                 cursor="next-cursor",
@@ -593,15 +621,14 @@ async def test_knowledge_items_passes_opaque_cursor(tracker) -> None:
 
 
 @pytest.mark.asyncio
-async def test_knowledge_search_requires_scope_or_ids(tracker) -> None:
-    async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+async def test_knowledge_search_requires_scope_or_ids() -> None:
+    async with ZhihuRestClient(SECRET) as c:
         with pytest.raises(InvalidArguments, match="至少"):
             await c.knowledge_search("退款规则")
-    assert tracker.snapshot().by_kind["knowledge"]["used"] == 0
 
 
 @pytest.mark.asyncio
-async def test_knowledge_search_contract(tracker) -> None:
+async def test_knowledge_search_contract() -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.post(f"{BASE_URL}/api/v1/knowledge/search").mock(
             return_value=httpx.Response(
@@ -609,7 +636,7 @@ async def test_knowledge_search_contract(tracker) -> None:
                 json=_envelope(data={"Items": []}),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             await c.knowledge_search(
                 " 退款规则 ",
                 knowledge_base_ids=["7526139256098382426"],
@@ -627,7 +654,7 @@ async def test_knowledge_search_contract(tracker) -> None:
 
 @pytest.mark.asyncio
 async def test_upload_knowledge_file_uses_documented_form_fields(
-    tracker, tmp_path
+    tmp_path
 ) -> None:
     pdf = tmp_path / "产品资料.pdf"
     pdf.write_bytes(b"%PDF-1.7\nknowledge")
@@ -645,7 +672,7 @@ async def test_upload_knowledge_file_uses_documented_form_fields(
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             result = await c.upload_knowledge_file(
                 pdf, knowledge_base_id="7526139256098382426"
             )
@@ -658,7 +685,6 @@ async def test_upload_knowledge_file_uses_documented_form_fields(
     assert b"name=\"KnowledgeBaseID\"" in body
     assert b"7526139256098382426" in body
     assert result.data["RecallContentID"] == "recall-content-id"
-    assert result.quota.by_kind["knowledge"]["used"] == 1
 
 
 @pytest.mark.asyncio
@@ -672,9 +698,9 @@ async def test_upload_knowledge_file_uses_documented_form_fields(
     ],
 )
 async def test_knowledge_operations_reject_invalid_values(
-    tracker, kwargs
+    kwargs
 ) -> None:
-    async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+    async with ZhihuRestClient(SECRET) as c:
         if "scope" in kwargs:
             with pytest.raises(InvalidArguments):
                 await c.knowledge_bases(**kwargs)
@@ -696,7 +722,7 @@ async def test_knowledge_operations_reject_invalid_values(
 
 @pytest.mark.asyncio
 async def test_upload_pdf_uses_multipart_without_json_content_type(
-    tracker, tmp_path
+    tmp_path
 ) -> None:
     pdf = tmp_path / "example.pdf"
     pdf.write_bytes(b"%PDF-1.7\ncontract-test")
@@ -711,7 +737,7 @@ async def test_upload_pdf_uses_multipart_without_json_content_type(
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             result = await c.upload_pdf(pdf)
 
     request = route.calls.last.request
@@ -722,16 +748,15 @@ async def test_upload_pdf_uses_multipart_without_json_content_type(
     assert b"Content-Type: application/pdf" in body
     assert b"%PDF-1.7" in body
     assert result.data["file_id"].startswith("file_")
-    assert result.quota.by_kind["pdf"]["used"] == 1
 
 
 @pytest.mark.asyncio
 async def test_upload_pdf_rejects_wrong_type_and_oversize(
-    tracker, tmp_path, monkeypatch
+    tmp_path, monkeypatch
 ) -> None:
     text_file = tmp_path / "example.txt"
     text_file.write_text("not pdf", encoding="utf-8")
-    async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+    async with ZhihuRestClient(SECRET) as c:
         with pytest.raises(InvalidArguments, match="pdf"):
             await c.upload_pdf(text_file)
 
@@ -754,13 +779,13 @@ async def test_upload_pdf_rejects_wrong_type_and_oversize(
                 else original_stat(self, *args, **kwargs)
             ),
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             with pytest.raises(InvalidArguments, match="100MB"):
                 await c.upload_pdf(pdf)
 
 
 @pytest.mark.asyncio
-async def test_pdf_task_create_and_status_contract(tracker) -> None:
+async def test_pdf_task_create_and_status_contract() -> None:
     task_id = "pdf_39b0e572b738a5ce8c5be600f9cf7b91"
     with respx.mock(assert_all_called=True) as router:
         create_route = router.post(
@@ -796,7 +821,7 @@ async def test_pdf_task_create_and_status_contract(tracker) -> None:
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             created = await c.create_pdf_parse_task(
                 "file_abc", idempotency_key="pdf-request-001"
             )
@@ -808,7 +833,6 @@ async def test_pdf_task_create_and_status_contract(tracker) -> None:
     assert dict(status_route.calls.last.request.url.params) == {}
     assert created.data["task_status"] == "pending"
     assert status.data["result"]["summary"] == "摘要"
-    assert status.quota.by_kind["pdf"]["used"] == 2
 
 
 # ----------------------------------------------------------------------
@@ -826,7 +850,7 @@ async def test_pdf_task_create_and_status_contract(tracker) -> None:
     ],
 )
 async def test_ppt_task_create_accepts_documented_urls(
-    tracker, resource_url: str
+    resource_url: str
 ) -> None:
     with respx.mock(assert_all_called=True) as router:
         route = router.post(
@@ -842,7 +866,7 @@ async def test_ppt_task_create_accepts_documented_urls(
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             await c.create_ppt_generation_task(
                 resource_url,
                 21,
@@ -870,15 +894,15 @@ async def test_ppt_task_create_accepts_documented_urls(
     ],
 )
 async def test_ppt_task_create_rejects_unsupported_input(
-    tracker, resource_url: str, num_pages: int
+    resource_url: str, num_pages: int
 ) -> None:
-    async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+    async with ZhihuRestClient(SECRET) as c:
         with pytest.raises(InvalidArguments):
             await c.create_ppt_generation_task(resource_url, num_pages)
 
 
 @pytest.mark.asyncio
-async def test_get_ppt_generation_task_contract(tracker) -> None:
+async def test_get_ppt_generation_task_contract() -> None:
     task_id = "ppt_39b0e572b738a5ce8c5be600f9cf7b91"
     with respx.mock(assert_all_called=True) as router:
         router.get(
@@ -897,11 +921,10 @@ async def test_get_ppt_generation_task_contract(tracker) -> None:
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             result = await c.get_ppt_generation_task(task_id)
 
     assert result.data["progress"] == 0.45
-    assert result.quota.by_kind["ppt"]["used"] == 1
 
 
 @pytest.mark.asyncio
@@ -919,7 +942,7 @@ async def test_get_ppt_generation_task_contract(tracker) -> None:
     ],
 )
 async def test_task_status_rejects_path_traversal_before_request(
-    tracker, method_name: str, task_id: str
+    method_name: str, task_id: str
 ) -> None:
     requests: list[httpx.Request] = []
 
@@ -932,7 +955,7 @@ async def test_task_status_rejects_path_traversal_before_request(
         base_url=BASE_URL, transport=transport
     ) as upstream:
         async with ZhihuRestClient(
-            SECRET, client=upstream, quota_tracker=tracker
+            SECRET, client=upstream
         ) as c:
             method = getattr(c, method_name)
             with pytest.raises(InvalidArguments, match="task_id"):
@@ -961,7 +984,7 @@ async def test_task_status_rejects_path_traversal_before_request(
     ],
 )
 async def test_new_documented_error_code_mapping(
-    tracker, code: int, error_type: type[Exception]
+    code: int, error_type: type[Exception]
 ) -> None:
     with respx.mock(assert_all_called=True) as router:
         router.post(f"{BASE_URL}/api/v1/pdf-parse/tasks").mock(
@@ -970,17 +993,13 @@ async def test_new_documented_error_code_mapping(
                 json=_envelope(code=code, message=f"error-{code}"),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             with pytest.raises(error_type, match=f"error-{code}"):
                 await c.create_pdf_parse_task("file_abc")
 
-    assert tracker.snapshot().by_kind["pdf"]["used"] == 0
-
 
 @pytest.mark.asyncio
-async def test_documented_error_code_mapping_survives_http_400(
-    tracker,
-) -> None:
+async def test_documented_error_code_mapping_survives_http_400() -> None:
     with respx.mock(assert_all_called=True) as router:
         router.post(f"{BASE_URL}/api/v1/pdf-parse/tasks").mock(
             return_value=httpx.Response(
@@ -991,6 +1010,6 @@ async def test_documented_error_code_mapping_survives_http_400(
                 ),
             )
         )
-        async with ZhihuRestClient(SECRET, quota_tracker=tracker) as c:
+        async with ZhihuRestClient(SECRET) as c:
             with pytest.raises(InvalidArguments, match="file is expired"):
                 await c.create_pdf_parse_task("file_expired")

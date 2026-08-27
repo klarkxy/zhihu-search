@@ -5,7 +5,7 @@
 
 Flags:
     --version, --check-token, --save-token <s>, --clear-token,
-    --quota, --reset-quota, --probe
+    --quota, --probe
 
 Commands (默认: serve):
     install-skill      通过 npx skills 安装 Agent Skill
@@ -14,6 +14,7 @@ Commands (默认: serve):
     search <query>     搜索知乎内容
     ask <query>        向知乎直答提问
     trending           查看知乎热榜
+    quota              查询官方每日额度
     user-*             查询用户公开内容、关注与收藏
     knowledge-*        查询知识库、上传文件、检索文档
     pdf-* / ppt-*      上传文件、创建任务、查询任务状态
@@ -33,7 +34,7 @@ import subprocess
 import sys
 
 from . import __version__, commands, credentials, formatters
-from .quota import QuotaSnapshot, QuotaTracker
+from .upstream.http_client import OFFICIAL_QUOTA_IDS
 
 
 # ---------------------------------------------------------------------------
@@ -72,12 +73,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--quota",
         action="store_true",
-        help="打印今日配额用量并退出。",
-    )
-    p.add_argument(
-        "--reset-quota",
-        action="store_true",
-        help="把今日计数清零并退出。",
+        help="查询知乎开放平台官方每日额度并退出（等同 quota）。",
     )
     p.add_argument(
         "--probe",
@@ -90,7 +86,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="command",
         metavar=(
             "{install-skill,search,ask,trending,user-*,knowledge-*,"
-            "pdf-*,ppt-*,oauth-*,serve,openwebui}"
+            "quota,pdf-*,ppt-*,oauth-*,serve,openwebui}"
         ),
     )
 
@@ -188,6 +184,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="返回条数，上限 30。",
     )
     tp.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown",
+        help="输出格式。",
+    )
+
+    # --- 官方每日额度 ---
+    qp = sub.add_parser("quota", help="查询知乎开放平台官方每日额度。")
+    qp.add_argument(
+        "--api-id",
+        action="append",
+        default=[],
+        dest="api_ids",
+        choices=OFFICIAL_QUOTA_IDS,
+        help="只查询指定额度项，可重复；省略则返回全部额度。",
+    )
+    qp.add_argument(
         "--format", choices=["markdown", "json"], default="markdown",
         help="输出格式。",
     )
@@ -430,7 +441,6 @@ async def _probe() -> int:
         result = await client.hot_list(limit=1)
     finally:
         await client.aclose()
-    print(result.quota.to_line())
     items = (result.data or {}).get("Items") or []
     if not items:
         print("(返回为空 items)")
@@ -440,32 +450,9 @@ async def _probe() -> int:
     return 0
 
 
-def _show_quota() -> int:
-    tracker = QuotaTracker()
-    snap = tracker.snapshot()
-    print(snap.to_line())
-    print()
-    print(snap.to_block())
-    return 0
-
-
 # ---------------------------------------------------------------------------
 # 输出工具
 # ---------------------------------------------------------------------------
-
-
-def _quota_to_dict(snapshot: QuotaSnapshot | None) -> dict | None:
-    if snapshot is None:
-        return None
-    breakers = {}
-    for kind, brk in (snapshot.breakers or {}).items():
-        breakers[kind] = {"state": brk.state, "remaining_cooldown": brk.remaining_cooldown}
-    return {
-        "by_kind": snapshot.by_kind,
-        "breakers": breakers,
-        "reset_at": snapshot.reset_at,
-    }
-
 
 def _print_json(result: commands.CommandResult, kind: str) -> int:
     """JSON 输出：stdout 只输出 JSON，不混任何提示文本。"""
@@ -474,18 +461,14 @@ def _print_json(result: commands.CommandResult, kind: str) -> int:
         payload["data"] = result.data or {}
     else:
         payload["error"] = result.error
-    if result.quota is not None:
-        payload["quota"] = _quota_to_dict(result.quota)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0 if result.success else 1
 
 
 def _print_markdown(result: commands.CommandResult, kind: str, **fmt_kw: object) -> int:
-    """Markdown 输出：格式化文本 + 配额行。"""
+    """Markdown 输出。"""
     if not result.success:
         print(f"[错误] {result.error}", file=sys.stderr)
-        if result.quota is not None:
-            print(result.quota.to_line(), file=sys.stderr)
         return 1
 
     text = ""
@@ -495,6 +478,8 @@ def _print_markdown(result: commands.CommandResult, kind: str, **fmt_kw: object)
         text = formatters.format_zhida_answer(result.data)
     elif kind == "trending":
         text = formatters.format_hot_items(result.data)
+    elif kind == "quota":
+        text = formatters.format_quota(result.data)
     elif kind == "user_contents":
         text = formatters.format_content_items(result.data, heading="知乎用户内容")
     elif kind == "user_followees":
@@ -522,8 +507,6 @@ def _print_markdown(result: commands.CommandResult, kind: str, **fmt_kw: object)
 
     if text:
         print(text)
-    if result.quota is not None:
-        print(f"\n{result.quota.to_line()}")
     return 0
 
 
@@ -562,6 +545,18 @@ async def _run_trending(args: argparse.Namespace) -> int:
     if args.format == "json":
         return _print_json(result, "trending")
     return _print_markdown(result, "trending")
+
+
+async def _run_quota(args: argparse.Namespace) -> int:
+    result = await commands.run_quota(api_ids=args.api_ids or None)
+    if args.format == "json":
+        return _print_json(result, "quota")
+    return _print_markdown(result, "quota")
+
+
+async def _show_quota() -> int:
+    result = await commands.run_quota()
+    return _print_markdown(result, "quota")
 
 
 async def _run_user_contents(args: argparse.Namespace) -> int:
@@ -810,12 +805,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.quota:
-        return _show_quota()
-
-    if args.reset_quota:
-        QuotaTracker().reset()
-        print("OK  今日计数已清零")
-        return 0
+        try:
+            return asyncio.run(_show_quota())
+        except credentials.CredentialsError as e:
+            print(f"FAIL  {e}", file=sys.stderr)
+            return 1
 
     if args.probe:
         try:
@@ -858,6 +852,8 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(_run_ask(args))
         if args.command == "trending":
             return asyncio.run(_run_trending(args))
+        if args.command == "quota":
+            return asyncio.run(_run_quota(args))
         if args.command == "user-contents":
             return asyncio.run(_run_user_contents(args))
         if args.command == "user-followees":

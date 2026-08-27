@@ -1,15 +1,16 @@
 # API 覆盖与边界
 
-快照日期：2026-08-16
+快照日期：2026-08-27
 官方目录：[developer.zhihu.com/docs](https://developer.zhihu.com/docs)
 
 ## 结论
 
-知乎官方目录共有 26 条文档：3 条指南、15 条 API、4 条 Skill 和 4 条
-MCP。15 条 API 实际包含 18 个数据端点；OAuth 指南另包含授权和 token
-交换流程。
+知乎官方目录共有 27 条文档：4 条指南、15 条 API、4 条 Skill 和 4 条
+MCP。15 条 API 实际包含 18 个业务端点；
+[新增额度指南](https://developer.zhihu.com/docs?key=quota)另包含 1 个官方额度端点，
+OAuth 指南还包含授权和 token 交换流程。
 
-本项目覆盖全部 **18 个数据端点 + 2 个 OAuth 端点**。官方 Skill/MCP
+本项目覆盖全部 **19 个业务/账号端点 + 2 个 OAuth 端点**。官方 Skill/MCP
 以及 Zhihu CLI 与现有搜索、直答、热榜、用户数据能力重复，因此只记录，
 不再递归代理。
 
@@ -21,6 +22,7 @@ MCP。15 条 API 实际包含 18 个数据端点；OAuth 指南另包含授权�
 | 全网搜索 | `GET /api/v1/content/global_search` | `search --scope web` | `search` |
 | 热榜 | `GET /api/v1/content/hot_list` | `trending` | `trending` |
 | 直答 | `POST /v1/chat/completions` | `ask` | `ask` |
+| 官方额度 | `GET /api/v1/quota` | `quota` / `--quota` | `quota` |
 | 用户创作 | `GET /api/v1/user/contents` | `user-contents` | `user_contents` |
 | 用户关注 | `GET /api/v1/user/followees` | `user-followees` | `user_followees` |
 | 近期收藏 | `GET /api/v1/user/collections` | `user-collections` | `user_collections` |
@@ -51,7 +53,7 @@ MCP 默认使用 `compact`，避免把低频工具长期放进模型上下文：
 | `knowledge` | compact 加 `knowledge_bases`、`knowledge_items`、`knowledge_search` |
 | `user` | compact 加 5 个 `user_*` / `favlist_contents` 工具 |
 | `office` | compact 加 `pdf_create`、`pdf_status`、`ppt_create`、`ppt_status` |
-| `full` | 上表 15 个业务工具，加 `other`，共 16 个 |
+| `full` | 上表 16 个业务/账号工具，加 `other`，共 17 个 |
 
 选择值是逗号分隔的档位名与工具名混写，结果取并集，例如 `knowledge,user`
 或 `compact,knowledge_search`。只写工具名时为严格 allowlist，例如
@@ -59,18 +61,18 @@ MCP 默认使用 `compact`，避免把低频工具长期放进模型上下文：
 
 `other` 是会话级管理工具：
 
-- `enable` 展开 `user_contents`、`user_followees`、`user_collections`、
+- `enable` 展开 `quota`、`user_contents`、`user_followees`、`user_collections`、
   `user_favlists`、`favlist_contents`、`knowledge_bases`、
   `knowledge_items`、`knowledge_search`、`pdf_create`、`pdf_status`、
   `ppt_create`、`ppt_status`。
-- `disable` 收起上述 12 个工具。
+- `disable` 收起上述 13 个工具。
 - `reset` 恢复服务器启动时的工具集合。
 
-只要选择里出现档位名，`other` 就可管理全部 12 个低频工具；纯工具名的严格
+只要选择里出现档位名，`other` 就可管理全部 13 个低频工具；纯工具名的严格
 allowlist 下只能管理其中已允许的名称，无法展开列表外工具。
 
 启动参数为 `--tools`；也可用 `ZHIHU_MCP_TOOLS` 设置默认值，命令行优先。
-OpenAPI 仍直接提供 15 个业务操作，不使用 MCP 的会话级 `other`。
+OpenAPI 仍直接提供 16 个业务/账号操作，不使用 MCP 的会话级 `other`。
 
 ## 官方文档中的不确定项
 
@@ -86,6 +88,8 @@ OpenAPI 仍直接提供 15 个业务操作，不使用 MCP 的会话级 `other`�
 | 热榜 Markdown 写最大 30，Playground 写 50 | 保持正式合同的 30 |
 | PDF/PPT 未给轮询间隔 | 只提供显式状态查询，不自动紧密轮询 |
 | 知识库上传是同步接口，未给超时建议 | 本地等待 180 秒；超时后不自动重试 |
+| 额度文档未说明自然日的时区与重置时刻 | 不猜测倒计时，只展示官方当前值 |
+| 额度筛选未说明重复 ID 的语义 | 调用前按首次出现顺序去重 |
 | 官方 Zhihu CLI / Skill / MCP | 只记录，不递归代理 |
 
 ## 安全边界
@@ -97,3 +101,4 @@ OpenAPI 仍直接提供 15 个业务操作，不使用 MCP 的会话级 `other`�
 - OpenAPI 只有配置 `--api-key` 或 `ZHIHU_OPENWEBUI_API_KEY` 时才启用
   Bearer 鉴权；无 key 模式只能用于本机或受控私网。
 - 不提供任意 URL 或原始 HTTP 透传工具。
+- 官方额度接口是唯一额度来源；不做本地计数、预测、熔断或重置。

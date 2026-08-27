@@ -67,6 +67,34 @@ def format_hot_items(data: dict | None) -> str:
     return "\n".join(lines).rstrip()
 
 
+def format_quota(data: Any) -> str:
+    """格式化知乎开放平台返回的官方自然日额度。"""
+    items = data
+    if isinstance(data, dict):
+        items = _pick(data, "Data", "data", "Items", "items")
+    if not isinstance(items, list) or not items:
+        return "官方额度列表为空。"
+
+    lines: list[str] = ["## 官方每日额度", ""]
+    for raw_item in items:
+        item = raw_item if isinstance(raw_item, dict) else {}
+        api_id = _pick(item, "APIID", "api_id") or "unknown"
+        name = _pick(item, "APIName", "api_name") or api_id
+        total = _pick(item, "TotalQuota", "total_quota")
+        used = _pick(item, "TotalUsed", "total_used")
+        remaining = _pick(item, "RemainingQuota", "remaining_quota")
+        lines.append(f"- {name} (`{api_id}`)：已用 {used} / {total}，剩余 {remaining}")
+
+    lines.extend(
+        [
+            "",
+            "知识库的列表、内容、上传和检索共用 `knowledge` 额度；"
+            "PDF 解析与 PPT 生成共用 `tools` 额度。",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def format_zhida_answer(data: dict | None) -> str:
     """直答回答 Markdown 格式化。
 
@@ -623,6 +651,7 @@ def _task_label(task_type: str) -> str:
 __all__ = [
     "format_search_items",
     "format_hot_items",
+    "format_quota",
     "format_zhida_answer",
     "format_content_items",
     "format_followees",

@@ -66,6 +66,17 @@ async def test_trending_returns_structured_error_on_missing_creds() -> None:
 
 
 @pytest.mark.asyncio
+async def test_quota_returns_structured_error_on_missing_creds() -> None:
+    """quota 与其他官方接口共用 Access Secret 错误边界。"""
+    with patch.object(server, "_get_client", side_effect=_mock_credentials_error):
+        result = await server.quota()
+
+    assert isinstance(result, ToolResult)
+    assert result.is_error is True
+    assert "未找到" in result.content[0].text
+
+
+@pytest.mark.asyncio
 async def test_new_tool_catalog_is_registered() -> None:
     tools = await server.mcp.list_tools()
     names = {tool.name for tool in tools}
@@ -78,6 +89,20 @@ async def test_new_tool_catalog_is_registered() -> None:
     other_tool = next(tool for tool in tools if tool.name == "other")
     assert other_tool.title == "其他"
     assert set(other_tool.parameters["properties"]) == {"action"}
+    quota_tool = next(tool for tool in tools if tool.name == "quota")
+    assert quota_tool.title == "知乎开放平台每日额度"
+    assert quota_tool.annotations is not None
+    assert quota_tool.annotations.readOnlyHint is True
+    api_ids_array = quota_tool.parameters["properties"]["api_ids"]["anyOf"][0]
+    assert api_ids_array["items"]["enum"] == [
+        "global_search",
+        "zhihu_search",
+        "hot_list",
+        "user_data",
+        "zhida_openai",
+        "knowledge",
+        "tools",
+    ]
 
 
 @pytest.mark.asyncio
@@ -227,7 +252,9 @@ def test_profiles_and_tool_names_can_be_mixed_and_unioned() -> None:
         server.CORE_MCP_TOOL_NAMES | {"knowledge_search"}
     )
     assert server.resolve_mcp_tool_names("knowledge,office") == (
-        server.ALL_MCP_TOOL_NAMES - server.USER_MCP_TOOL_NAMES
+        server.CORE_MCP_TOOL_NAMES
+        | server.KNOWLEDGE_MCP_TOOL_NAMES
+        | server.OFFICE_MCP_TOOL_NAMES
     )
 
 
@@ -236,6 +263,7 @@ def test_capability_groups_partition_the_optional_tools() -> None:
         server.USER_MCP_TOOL_NAMES,
         server.KNOWLEDGE_MCP_TOOL_NAMES,
         server.OFFICE_MCP_TOOL_NAMES,
+        server.ACCOUNT_MCP_TOOL_NAMES,
     )
     assert set().union(*groups) == server.OPTIONAL_MCP_TOOL_NAMES
     assert sum(len(group) for group in groups) == len(server.OPTIONAL_MCP_TOOL_NAMES)

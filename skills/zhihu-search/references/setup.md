@@ -91,4 +91,5 @@ codex mcp list
 Use `codex mcp list` only to detect an unexpected persistent registration. Explain the lifecycle
 cost and ask before removing or changing user configuration.
 
-Use `uvx zhihu-search --reset-quota` only for local debugging and never as routine recovery.
+`--quota` queries Zhihu's official daily quota endpoint and does not consume business quota. It
+does not read or reset any local counter. Use `quota --api-id knowledge` to narrow the result.

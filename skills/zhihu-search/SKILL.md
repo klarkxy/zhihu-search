@@ -67,6 +67,7 @@ When the MCP catalog exposes the `zhihu` server, call its matching core tool dir
 
 If the catalog already shows a matching capability tool, call it instead of `other` or the CLI:
 
+- official account quota: `quota`
 - `knowledge` profile: `knowledge_bases`, `knowledge_items`, `knowledge_search`
 - `user` profile: `user_contents`, `user_followees`, `user_collections`, `user_favlists`,
   `favlist_contents`
@@ -81,7 +82,22 @@ Use these only when the user explicitly asks for the corresponding Zhihu capabil
 matching MCP tool is already visible (for example after `--tools knowledge`, `--tools user`,
 `--tools office`, or `--tools full`), call it directly. In compact mode, use
 `other(action="enable")` first; do not silently substitute `search` or `ask` for a hidden
-knowledge, user-data, PDF, or PPT tool. If MCP cannot expose the tool, use the CLI.
+quota, knowledge, user-data, PDF, or PPT tool. If MCP cannot expose the tool, use the CLI.
+
+### Official quota
+
+Use Zhihu's official quota endpoint as the only quota source. Do not infer usage from local calls,
+maintain a local counter, or impose a client-side circuit breaker. The query itself does not
+consume business quota.
+
+```bash
+uvx zhihu-search quota
+uvx zhihu-search quota --api-id knowledge --api-id tools
+```
+
+Preserve `TotalQuota`, `TotalUsed`, and `RemainingQuota` as returned. Do not invent a reset time;
+the official documentation describes a natural-day quota but does not specify its timezone or
+exact reset instant.
 
 ### Authorized user data
 
@@ -150,5 +166,6 @@ Do not invent undocumented state, scopes, PKCE, refresh/revoke, or user-info flo
 - Model-facing tools must never accept a local path, app key, or OAuth token.
 - Preserve opaque offsets, cursors, `file_id`, `task_id`, `KnowledgeBaseID`,
   `RecallContentID`, and expiring result URLs exactly.
-- Return useful titles, links, attribution, task state, and the quota line when present.
+- Return useful titles, links, attribution, and task state. For quota requests, report the official
+  total, used, and remaining values.
 - State clearly when results are weak or empty.

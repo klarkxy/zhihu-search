@@ -41,6 +41,7 @@ def test_openapi_exposes_every_model_safe_new_operation() -> None:
     """New user/task operations share the same bearer-protected router."""
     schema = _client().get("/openapi.json").json()
     expected = {
+        "/quota": "quota",
         "/user/contents": "user_contents",
         "/user/followees": "user_followees",
         "/user/collections": "user_collections",
@@ -64,6 +65,16 @@ def test_openapi_exposes_every_model_safe_new_operation() -> None:
     assert "/knowledge/upload" not in schema["paths"]
     assert "/knowledge/files" not in schema["paths"]
     assert not any(path.startswith("/oauth") for path in schema["paths"])
+    quota_schema = schema["components"]["schemas"]["QuotaRequest"]
+    assert quota_schema["properties"]["api_ids"]["items"]["enum"] == [
+        "global_search",
+        "zhihu_search",
+        "hot_list",
+        "user_data",
+        "zhida_openai",
+        "knowledge",
+        "tools",
+    ]
     user_schema = schema["components"]["schemas"]["UserContentsRequest"]
     assert "oauth_token" not in user_schema["properties"]
     assert "use_configured_oauth_user" in user_schema["properties"]
@@ -178,6 +189,38 @@ def test_tool_endpoint_can_run_without_auth() -> None:
 
     assert response.status_code == 200
     assert response.json()["success"] is True
+
+
+def test_quota_route_uses_official_filter_without_local_quota_field() -> None:
+    client = _client(api_key=None)
+    run_quota = AsyncMock(
+        return_value=CommandResult(
+            success=True,
+            data=[
+                {
+                    "APIID": "knowledge",
+                    "APIName": "知识库",
+                    "TotalQuota": 100,
+                    "TotalUsed": 12,
+                    "RemainingQuota": 88,
+                }
+            ],
+        )
+    )
+    with (
+        patch.object(openwebui, "_get_client", return_value=object()),
+        patch("zhihu_search.openwebui.commands.run_quota", new=run_quota),
+    ):
+        response = client.post("/quota", json={"api_ids": ["knowledge"]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "quota"
+    assert payload["data"][0]["RemainingQuota"] == 88
+    assert "quota" not in payload
+    run_quota.assert_awaited_once()
+    assert run_quota.await_args.kwargs["api_ids"] == ["knowledge"]
+    assert run_quota.await_args.kwargs["client"] is not None
 
 
 def test_user_contents_route_uses_server_side_oauth_and_pagination(

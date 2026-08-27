@@ -111,12 +111,12 @@ args:    zhihu-search serve --tools compact
 | `knowledge` | compact 加 3 个知识库工具 |
 | `user` | compact 加 5 个用户数据工具 |
 | `office` | compact 加 2 个 PDF 和 2 个 PPT 工具 |
-| `full` | 暴露全部 16 个工具 |
+| `full` | 暴露全部 17 个工具 |
 | 逗号混写 | 档位名与工具名取并集，如 `knowledge,user` |
 | 纯工具名 allowlist | 严格只允许指定工具 |
 
 `other` 的 `enable`、`disable`、`reset` 只改变当前 MCP 会话，可展开、收起
-或复原低频显式工具。选择里含档位名时可管理全部 12 个；纯工具名 allowlist
+或复原低频显式工具。选择里含档位名时可管理全部 13 个；纯工具名 allowlist
 只能管理其中已允许的工具，不能越过启动开关。`ZHIHU_MCP_TOOLS`
 可设置默认值，但命令行 `--tools` 优先。
 
@@ -133,7 +133,7 @@ args:    zhihu-search serve --tools compact
 6. 用未点名知乎的资料查询验证一次真实 `search`。
 
 compact 启动时应看到 4 个工具；knowledge 7 个，office 8 个，user 9 个，
-full 16 个。不要擅自结束用户的客户端进程。
+full 17 个。不要擅自结束用户的客户端进程。
 
 ## 5. 最后才考虑 OpenWebUI
 
@@ -153,7 +153,7 @@ uvx zhihu-search openwebui \
 | 找不到 `uvx` | 安装 uv 并重新打开终端 |
 | `--probe` 失败 | 检查凭证和网络，不要循环请求 |
 | MCP 工具数不对 | 检查 `--tools`、`ZHIHU_MCP_TOOLS` 后重启客户端 |
-| `Code=30002` | 到知乎开放平台检查额度或接口权限 |
+| `Code=30002` | 运行 `--quota` 查看官方剩余额度，再检查接口权限 |
 | OAuth 用户调用失败 | 在服务端配置 `ZHIHU_OAUTH_TOKEN` |
 | PDF/PPT 长期处理中 | 稍后查询状态，不要紧密轮询 |
 
