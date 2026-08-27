@@ -1,8 +1,9 @@
 # Claude Code 配置
 
-先完成 [通用准备](README.md)。
+先看[通用安装说明](README.md)。如果当前 Claude Code 环境支持 Skill，优先
+安装 Skill；下面的 MCP 配置只适合高频、持续调用。
 
-## 配置
+## 可选：配置 MCP
 
 在全局 `~/.claude.json` 或项目级 `.mcp.json` 的 `mcpServers` 中加入：
 
@@ -18,20 +19,15 @@
 }
 ```
 
-保留文件中已有的其他配置，不要把 Access Secret 或 OAuth token 写进这里。
-建有知乎知识库时将 `compact` 改为 `knowledge`，避免私有文档检索被静默
-退回全网搜索；用户数据用 `user`，PDF/PPT 用 `office`，一次暴露全部 16
-个工具用 `full`。档位与工具名也可逗号混写。完整开关见
-[通用安装说明](README.md#4-mcp高频集成)。
+保留原有配置，不要把 Access Secret 或 OAuth token 写进文件。`compact` 是
+默认档位；知识库选 `knowledge`，用户数据选 `user`，PDF/PPT 选 `office`，
+全部 17 个 MCP 工具选 `full`。详细语义见
+[MCP 高频集成](README.md#2-mcp高频集成)。
 
-## 重启
+## 重启与验证
 
-关闭并重新打开 Claude Code。
+关闭并重新打开 Claude Code，然后发送：
 
-## 验证
+> 用 zhihu 搜索知乎上的“RAG 评测方法”，返回 3 条结果并附链接。
 
-发送：
-
-> 用 zhihu 搜索知乎上的“RAG 评测方法”，返回 3 条结果。
-
-如果工具没有出现或调用失败，查看 [通用排障](README.md#维护与排障)。
+工具未出现或调用失败时，查看[通用排障](README.md#维护与排障)。

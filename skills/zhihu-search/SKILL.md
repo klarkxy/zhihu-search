@@ -6,11 +6,12 @@ description: >-
 
 # zhihu-search
 
-Use `zhihu-search` as an on-demand Chinese-community source while keeping repository-local work
-local. Run the narrowest `uvx zhihu-search` command by default. Reuse a matching `zhihu` MCP tool
-only when the current catalog already exposes it; do not add a persistent MCP server merely to
-complete an occasional request. Read [references/setup.md](references/setup.md) only for
-installation, credentials, optional high-frequency MCP integration, or diagnostics.
+Use the `zhihu-search` Skill as the single entry point for Chinese-community research while keeping
+repository-local work local. After the Skill routes the request, reuse a matching `zhihu` MCP tool
+when the current catalog already exposes it; otherwise run one narrow `uvx zhihu-search` command on
+demand. Never add a persistent MCP server merely to complete an occasional request. Read
+[references/setup.md](references/setup.md) only for installation, credentials, optional
+high-frequency MCP integration, or diagnostics.
 
 ## Route the request
 
@@ -33,31 +34,7 @@ Do not use external Zhihu tools for repository-local code questions, pure math o
 translation, or transformations limited to text/files the user already provided unless the user
 also requests external verification.
 
-## Run on demand
-
-Check credentials before any operation except `oauth-url` and `oauth-token`:
-
-```bash
-uvx zhihu-search --check-token
-```
-
-This command must report only whether credentials are configured and their source. Never echo a
-secret fragment or a user-specific credentials path into chat or logs. Use `--probe` only when an
-end-to-end upstream check is necessary because it performs one real request.
-
-Then run the narrowest command:
-
-```bash
-uvx zhihu-search search "<query>" --scope zhihu --count 5
-uvx zhihu-search search "<query>" --scope web --count 10
-uvx zhihu-search ask "<question>" --model fast
-uvx zhihu-search trending --limit 10
-```
-
-Use `--filter 'host=="example.com"'` only with web search. Keep `--search-db all` unless the user
-explicitly asks for `realtime` or `static`.
-
-## Reuse visible MCP tools
+## Use visible MCP tools when available
 
 When the MCP catalog exposes the `zhihu` server, call its matching core tool directly:
 
@@ -75,6 +52,31 @@ If the catalog already shows a matching capability tool, call it instead of `oth
 
 Do not run a duplicate CLI request after a successful MCP call. Do not register or start a
 persistent MCP server unless the user explicitly asks for high-frequency MCP integration.
+
+## Otherwise run one command on demand
+
+Check credentials before any operation except `oauth-url` and `oauth-token`:
+
+```bash
+uvx zhihu-search --check-token
+```
+
+This command must report only whether credentials are configured and their source. Never echo a
+secret fragment or a user-specific credentials path into chat or logs. Use `--probe` only when an
+end-to-end upstream check is necessary because it performs one real request.
+
+Then run exactly one narrow command for the routed intent:
+
+```bash
+uvx zhihu-search search "<query>" --scope zhihu --count 5
+uvx zhihu-search search "<query>" --scope web --count 10
+uvx zhihu-search ask "<question>" --model fast
+uvx zhihu-search trending --limit 10
+```
+
+Never invoke bare `uvx zhihu-search`: without a subcommand it starts the MCP server. Use
+`--filter 'host=="example.com"'` only with web search. Keep `--search-db all` unless the user
+explicitly asks for `realtime` or `static`.
 
 ## Low-frequency explicit workflows
 

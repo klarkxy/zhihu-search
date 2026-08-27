@@ -104,9 +104,9 @@ def test_trigger_eval_set_covers_positive_and_near_miss_cases() -> None:
 def test_setup_docs_share_the_high_frequency_mcp_anchor() -> None:
     setup_dir = ROOT / "setup"
     setup_readme = (setup_dir / "README.md").read_text(encoding="utf-8")
-    assert "## 4. MCP（高频集成）" in setup_readme
+    assert "## 2. MCP（高频集成）" in setup_readme
 
-    anchor = "(README.md#4-mcp高频集成)"
+    anchor = "(README.md#2-mcp高频集成)"
     for name in ("claude-code.md", "codex.md", "hanako-agent.md", "opencode.md"):
         assert anchor in (setup_dir / name).read_text(encoding="utf-8")
 

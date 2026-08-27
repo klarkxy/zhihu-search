@@ -1,7 +1,7 @@
 interface:
   display_name: "Zhihu Search"
   short_description: "主动搜索资料、核实来源、获取知乎直答与当前热点讨论"
-  default_prompt: "Use $zhihu-search for one narrow Chinese-community query: reuse a matching visible Zhihu MCP tool, otherwise run the CLI on demand, and return source links when available."
+  default_prompt: "Use $zhihu-search as the entry point for one narrow Chinese-community query. Reuse a matching visible Zhihu MCP tool when available; otherwise run the CLI on demand, and return source links."
 
 policy:
   allow_implicit_invocation: true

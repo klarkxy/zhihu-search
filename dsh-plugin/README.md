@@ -1,70 +1,67 @@
 # dsh-plugin-zhihu-search
 
-DeepSeek Harness bundle for
-[`zhihu-search`](https://github.com/klarkxy/zhihu-search). It mounts the
-same `zhihu-search` Skill into the target profile. Queries still run as
-on-demand `uvx zhihu-search` commands. The bundle does not start an MCP
-server or store credentials in DSH config.
+这是给 DeepSeek Harness 使用的 `zhihu-search` Skill 安装包。它只负责把同一份
+Skill 挂进目标 profile：不启动 MCP，也不在 DSH 配置中保存知乎凭证。
 
-## Install
+## 三步开始
 
-Install [uv](https://docs.astral.sh/uv/) and save the Zhihu Access Secret in
-your own terminal first:
+### 1. 在自己的终端准备凭证
 
 ```powershell
 uvx zhihu-search --save-token "<Access Secret>"
 uvx zhihu-search --probe
 ```
 
-Then install the bundle into the DSH profile you use:
+### 2. 安装到实际使用的 profile
 
 ```powershell
 dsh plugin --profile web add "github:klarkxy/zhihu-search"
 dsh --profile web --dump-config
 ```
 
-Plugin-search tools and DSH marketplaces index the GitHub topic
-`dsh-plugin`. That topic lives on the repository About page, not in this
-tree; `package.json` keywords do not publish it.
+### 3. 重启并做一次真实查询
 
-Stop and restart the profile after a persistent install. The Skill catalog
-should then include `zhihu-search`. The agent loads that Skill and runs the
-narrowest `uvx zhihu-search` command. It reuses a matching Zhihu MCP tool
-only when some other client already exposed one.
+重启 profile 后，Skill 目录应出现 `zhihu-search`。让 Agent 查询一条中文社区
+资料，并确认返回非空结果和来源链接。仅有安装成功提示或配置 dump 不算完整
+验证。
 
-For a local checkout smoke test:
+查询仍按需执行 `uvx zhihu-search`。只有当前会话已经提供匹配的知乎 MCP 工具
+时才直接复用；不要因为安装了 bundle 就再注册常驻 MCP。
 
-```powershell
-dsh plugin --profile web add .
-```
+完整的配置检查和故障说明见 [DSH 安装指南](../setup/dsh.md)。
 
-For a reproducible installation, pin a reviewed commit:
-
-```powershell
-dsh plugin --profile web add "github:klarkxy/zhihu-search#<commit>"
-```
-
-## Update or remove
+## 更新与移除
 
 ```powershell
 dsh plugin --profile web update dsh-plugin-zhihu-search
 dsh plugin --profile web remove dsh-plugin-zhihu-search
 ```
 
-Removing the bundle unmounts the profile-shipped Skill. It does not remove
-an independently installed copy under `~/.agents/skills`, and it does not
-remove the Python credential file. Use `uvx zhihu-search --clear-token`
-only when the user explicitly wants to delete that credential too.
+移除 bundle 不会删除独立安装的同名 Skill，也不会删除 Python 凭证文件。只有
+明确需要删除凭证时才运行 `uvx zhihu-search --clear-token`。
 
-If a same-named Skill already exists in the project or user skill roots,
-that nearer copy wins. Update or remove that copy if you want the
-bundle-shipped Skill to take effect.
+如果项目或用户 Skill 目录中已有同名副本，距离更近的副本会优先于 bundle
+版本。更新或移除那个副本后，bundle 版本才会生效。
 
-## Security boundary
+## 可复现安装与本地验证
 
-- The bundle contains no Access Secret and does not forward one in argv.
-- CLI calls read the existing per-user `zhihu-search` credential file
-  created by `zhihu-search --save-token`.
-- Never paste an Access Secret, OAuth app key, or OAuth token into chat.
-- Local PDF / knowledge-base upload and OAuth token exchange remain
-  CLI/Python-only and are not exposed as model-callable tools.
+固定到审核过的 Git commit：
+
+```powershell
+dsh plugin --profile web add "github:klarkxy/zhihu-search#<commit>"
+```
+
+从本地 checkout 验证：
+
+```powershell
+dsh plugin --profile web add .
+```
+
+## 安全边界
+
+- bundle 不包含 Access Secret，也不会通过命令参数转发密钥；
+- CLI 读取 `--save-token` 创建的用户级凭证文件；
+- 不要把 Access Secret、OAuth app key 或 OAuth token 发到聊天；
+- 本机 PDF/知识库上传和 OAuth token 交换只允许从 CLI/Python 执行。
+
+发布者请保留 GitHub 仓库的 `dsh-plugin` topic，供 Marketplace 和插件搜索发现。

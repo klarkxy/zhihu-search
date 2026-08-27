@@ -1,18 +1,25 @@
 # API 覆盖与边界
 
+这份文档是项目的能力事实表，适合核对“某个端点是否支持、通过什么入口调用、
+哪些参数不能交给模型”。如果只是想开始使用，请先看[安装与配置](../setup/README.md)：
+默认选 Skill，高频使用时再配置 MCP。
+
 快照日期：2026-08-27
+
 官方目录：[developer.zhihu.com/docs](https://developer.zhihu.com/docs)
 
-## 结论
+## 先看结论
 
 知乎官方目录共有 27 条文档：4 条指南、15 条 API、4 条 Skill 和 4 条
 MCP。15 条 API 实际包含 18 个业务端点；
 [新增额度指南](https://developer.zhihu.com/docs?key=quota)另包含 1 个官方额度端点，
 OAuth 指南还包含授权和 token 交换流程。
 
-本项目覆盖全部 **19 个业务/账号端点 + 2 个 OAuth 端点**。官方 Skill/MCP
-以及 Zhihu CLI 与现有搜索、直答、热榜、用户数据能力重复，因此只记录，
-不再递归代理。
+本项目覆盖全部 **19 个业务/账号端点 + 2 个 OAuth 端点**。用户默认通过本
+项目的 Skill 进入；高频客户端可以选择 MCP；脚本或本机文件操作使用 CLI。
+
+官方 Skill、MCP 和 Zhihu CLI 与本项目已有能力重复，因此这里只记录它们，
+不会再套一层代理。
 
 ## 端点覆盖
 
@@ -40,12 +47,13 @@ OAuth 指南还包含授权和 token 交换流程。
 | OAuth 授权 | `GET https://openapi.zhihu.com/authorize` | `oauth-url` | 不暴露 |
 | OAuth token | `POST https://openapi.zhihu.com/access_token` | `oauth-token` | 不暴露 |
 
-“覆盖”表示项目已有类型化调用路径。账号是否拥有接口权限，仍以知乎实际
-返回为准。
+这里的“覆盖”只表示项目已有类型化调用路径，不代表每个知乎账号都拥有对应
+权限；最终仍以知乎返回结果为准。
 
-## MCP 工具开关
+## MCP 工具开关（高频集成）
 
-MCP 默认使用 `compact`，避免把低频工具长期放进模型上下文：
+MCP 是 Skill 之后的高频集成选项。默认使用 `compact`，避免把低频工具长期
+放进模型上下文：
 
 | 档位 | 工具 |
 |---|---|
@@ -72,9 +80,10 @@ MCP 默认使用 `compact`，避免把低频工具长期放进模型上下文：
 allowlist 下只能管理其中已允许的名称，无法展开列表外工具。
 
 启动参数为 `--tools`；也可用 `ZHIHU_MCP_TOOLS` 设置默认值，命令行优先。
-OpenAPI 仍直接提供 16 个业务/账号操作，不使用 MCP 的会话级 `other`。
+这里的数量容易混淆：MCP `full` 是 **17 个工具**（16 个业务/账号工具加
+`other`）；OpenAPI 是 **16 个业务/账号操作**，没有会话级 `other`。
 
-## 官方文档中的不确定项
+## 官方文档没有说清的地方
 
 | 项目 | 本项目处理 |
 |---|---|
@@ -92,7 +101,7 @@ OpenAPI 仍直接提供 16 个业务/账号操作，不使用 MCP 的会话级 `
 | 额度筛选未说明重复 ID 的语义 | 调用前按首次出现顺序去重 |
 | 官方 Zhihu CLI / Skill / MCP | 只记录，不递归代理 |
 
-## 安全边界
+## 不可越过的安全边界
 
 - PDF 与知识库本机路径只允许 CLI/Python 读取，MCP/OpenAPI 不接收路径。
 - OAuth `app_key` 和 token 交换只允许 CLI/Python 执行。
