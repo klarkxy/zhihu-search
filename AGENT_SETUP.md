@@ -87,8 +87,10 @@ args:    zhihu-search serve --tools compact
 | `compact` | `search`、`ask`、`trending`、`other` |
 | `knowledge` | compact 加 3 个知识库工具 |
 | `user` | compact 加 5 个用户数据工具 |
+| `questions` | compact 加问题推荐和问题回答摘要 |
+| `creator` | compact 加全文、评论和 2 个创作统计工具 |
 | `office` | compact 加 4 个 PDF/PPT 工具 |
-| `full` | 16 个业务/账号工具加 `other`，共 17 个 |
+| `full` | 22 个业务/账号工具加 `other`，共 23 个 |
 
 档位和工具名可用逗号组合；只写工具名时是严格 allowlist。`other` 只能在当前
 会话和启动允许范围内执行 `enable`、`disable`、`reset`。
@@ -112,8 +114,8 @@ args:    zhihu-search serve --tools compact
 5. 新建或重新打开客户端任务，让工具目录重新加载。
 6. 用一条真实资料查询确认 `search` 成功并返回链接。
 
-工具数量应为：compact 4 个、knowledge 7 个、office 8 个、user 9 个、full
-17 个。不要擅自结束用户的客户端进程。
+工具数量应为：compact 4 个、knowledge 7 个、office 8 个、user 9 个、
+questions 6 个、creator 8 个、full 23 个。不要擅自结束用户的客户端进程。
 
 ## 3. DeepSeek Harness：安装同一份 Skill
 

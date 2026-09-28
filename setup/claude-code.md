@@ -20,8 +20,9 @@
 ```
 
 保留原有配置，不要把 Access Secret 或 OAuth token 写进文件。`compact` 是
-默认档位；知识库选 `knowledge`，用户数据选 `user`，PDF/PPT 选 `office`，
-全部 17 个 MCP 工具选 `full`。详细语义见
+默认档位；知识库选 `knowledge`，用户数据选 `user`，问题发现选
+`questions`，创作能力选 `creator`，PDF/PPT 选 `office`，
+全部 23 个 MCP 工具选 `full`。详细语义见
 [MCP 高频集成](README.md#2-mcp高频集成)。
 
 ## 重启与验证

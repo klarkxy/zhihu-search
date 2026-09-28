@@ -124,7 +124,7 @@ def test_documentation_installs_the_github_repository() -> None:
 
 
 def test_documentation_describes_mcp_capability_profiles() -> None:
-    markers = ("knowledge", "user", "office", "full")
+    markers = ("knowledge", "user", "questions", "creator", "office", "full")
     for path in (
         ROOT / "README.md",
         ROOT / "AGENT_SETUP.md",

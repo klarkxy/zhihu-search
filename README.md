@@ -1,7 +1,8 @@
 # zhihu-search
 
 让 Agent 按需查找知乎与中文社区信息，也可以直接调用知乎开放平台的搜索、
-直答、热榜、额度、用户公开数据、知识库、PDF、PPT 和 OAuth 辅助能力。
+直答、热榜、额度、用户公开数据、问题发现、创作能力、知识库、PDF、PPT 和
+OAuth 辅助能力。
 
 ## 从 Skill 开始
 
@@ -80,8 +81,10 @@ args:    zhihu-search serve --tools compact
 | `compact`（默认） | `search`、`ask`、`trending`、`other` |
 | `knowledge` | compact 加 3 个知识库工具 |
 | `user` | compact 加 5 个用户数据工具 |
+| `questions` | compact 加问题推荐和问题回答摘要 |
+| `creator` | compact 加全文、评论和 2 个创作统计工具 |
 | `office` | compact 加 2 个 PDF 和 2 个 PPT 工具 |
-| `full` | 16 个业务/账号工具加 `other`，共 17 个 |
+| `full` | 22 个业务/账号工具加 `other`，共 23 个 |
 
 档位和工具名可以用逗号组合，例如 `knowledge,user` 或
 `compact,knowledge_search`。只写工具名时是严格 allowlist，例如
@@ -89,7 +92,7 @@ args:    zhihu-search serve --tools compact
 `--tools` 的优先级更高。
 
 `other` 的 `enable`、`disable`、`reset` 只影响当前 MCP 会话。使用档位时，
-它能管理全部 13 个低频工具；使用纯工具名 allowlist 时，它不能越过启动时的
+它能管理全部 19 个低频工具；使用纯工具名 allowlist 时，它不能越过启动时的
 允许范围。
 
 客户端配置：
@@ -121,6 +124,10 @@ uvx zhihu-search quota --api-id knowledge
 
 ```bash
 uvx zhihu-search user-contents --content-type article --limit 10
+uvx zhihu-search question-recommendations --query "AI Agent" --count 5
+uvx zhihu-search question-answers "https://www.zhihu.com/question/123"
+uvx zhihu-search user-content-detail "https://zhuanlan.zhihu.com/p/123"
+uvx zhihu-search creator-account-stats --content-type all
 uvx zhihu-search knowledge-search "退款规则" --recall-scope personal
 uvx zhihu-search pdf-upload "./report.pdf"
 uvx zhihu-search ppt-create "https://zhuanlan.zhihu.com/p/123" --pages 12
@@ -165,8 +172,10 @@ uvx zhihu-search openwebui \
 | 能力 | 端点数 | 说明 |
 |---|---:|---|
 | 搜索、直答、热榜 | 4 | 知乎搜索、全网搜索、直答、热榜 |
+| 问题发现 | 2 | 适合回答的问题，以及问题下的回答摘要 |
 | 官方额度 | 1 | 总额度、已用额度和剩余额度 |
 | 用户公开数据 | 5 | 创作、关注、近期收藏和收藏夹 |
+| 创作能力 | 4 | 本人全文、评论、账号统计和单篇统计 |
 | 知识库 | 4 | 列表、内容、上传、检索 |
 | PDF 解析 | 3 | 上传、创建任务、查询状态 |
 | PPT 生成 | 2 | 创建任务、查询状态 |

@@ -398,6 +398,12 @@ class TestFormatKnowledge:
 def test_all_exports_new_formatters():
     assert {
         "format_content_items",
+        "format_question_recommendations",
+        "format_question_answers",
+        "format_content_detail",
+        "format_content_comments",
+        "format_creator_account_stats",
+        "format_creator_content_stats",
         "format_followees",
         "format_favlists",
         "format_knowledge_bases",
@@ -407,3 +413,51 @@ def test_all_exports_new_formatters():
         "format_upload_result",
         "format_task_status",
     }.issubset(formatters.__all__)
+
+
+def test_question_answers_stop_when_next_offset_is_missing():
+    text = formatters.format_question_answers(
+        {
+            "Items": [{"ContentToken": "1", "Summary": "<b>摘要</b>"}],
+            "Paging": {"IsEnd": False, "Totals": 4},
+        }
+    )
+    assert "不是回答全文" in text
+    assert "停止翻页" in text
+    assert "<b>" not in text
+    assert "摘要" in text
+
+
+def test_content_detail_strips_html_and_does_not_treat_empty_body_as_full_text():
+    rendered = formatters.format_content_detail(
+        {
+            "ContentType": "answer",
+            "Title": "标题",
+            "Body": "<p>第一段</p><script>alert(1)</script><p>第二段</p>",
+        }
+    )
+    assert "第一段" in rendered
+    assert "第二段" in rendered
+    assert "alert" not in rendered
+    assert "<p>" not in rendered
+
+    empty = formatters.format_content_detail({"ContentType": "zvideo", "Body": ""})
+    assert "不能视为全文" in empty
+
+
+def test_creator_stats_do_not_invent_missing_metrics():
+    text = formatters.format_creator_account_stats(
+        {
+            "ContentType": "all",
+            "Metrics": {"ViewCount": 0, "Yesterday": {"UpvoteCount": 2}},
+            "Followers": {"ActiveRatio": "0.125"},
+        }
+    )
+    assert "阅读：0" in text
+    assert "赞同：2" in text
+    assert "0.125" in text
+    assert "播放" not in text
+    assert "%" not in text
+
+    empty_items = formatters.format_creator_content_stats({"Items": []})
+    assert "不等于各项指标为零" in empty_items

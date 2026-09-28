@@ -98,11 +98,19 @@ async def test_new_tool_catalog_is_registered() -> None:
         "global_search",
         "zhihu_search",
         "hot_list",
-        "user_data",
+        "question_answers",
         "zhida_openai",
-        "knowledge",
         "tools",
+        "knowledge",
+        "user_data",
+        "creator",
     ]
+    detail_schema = next(
+        tool for tool in tools if tool.name == "user_content_detail"
+    ).parameters
+    assert "oauth_token" not in detail_schema["properties"]
+    assert "use_configured_oauth_user" not in detail_schema["properties"]
+    assert "content_url" in detail_schema["properties"]
 
 
 @pytest.mark.asyncio
@@ -240,6 +248,12 @@ def test_capability_profiles_add_one_group_to_the_core_set() -> None:
     assert server.resolve_mcp_tool_names("office") == (
         server.CORE_MCP_TOOL_NAMES | server.OFFICE_MCP_TOOL_NAMES
     )
+    assert server.resolve_mcp_tool_names("questions") == (
+        server.CORE_MCP_TOOL_NAMES | server.QUESTION_MCP_TOOL_NAMES
+    )
+    assert server.resolve_mcp_tool_names("creator") == (
+        server.CORE_MCP_TOOL_NAMES | server.CREATOR_MCP_TOOL_NAMES
+    )
 
 
 def test_profiles_and_tool_names_can_be_mixed_and_unioned() -> None:
@@ -261,6 +275,8 @@ def test_profiles_and_tool_names_can_be_mixed_and_unioned() -> None:
 def test_capability_groups_partition_the_optional_tools() -> None:
     groups = (
         server.USER_MCP_TOOL_NAMES,
+        server.QUESTION_MCP_TOOL_NAMES,
+        server.CREATOR_MCP_TOOL_NAMES,
         server.KNOWLEDGE_MCP_TOOL_NAMES,
         server.OFFICE_MCP_TOOL_NAMES,
         server.ACCOUNT_MCP_TOOL_NAMES,

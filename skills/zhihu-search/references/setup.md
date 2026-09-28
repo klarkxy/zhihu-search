@@ -59,7 +59,7 @@ CLI command.
 If matching Zhihu MCP tools are already visible, reuse them and do not duplicate the request with
 the CLI. Configure persistent MCP only when the user explicitly asks for high-frequency integration
 and accepts the client process lifecycle. The profiles are `compact`, `knowledge`, `user`,
-`office`, and `full`; profile names may be mixed with explicit tool names.
+`questions`, `creator`, `office`, and `full`; profile names may be mixed with explicit tool names.
 
 ```text
 command: uvx

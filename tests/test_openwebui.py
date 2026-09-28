@@ -47,6 +47,12 @@ def test_openapi_exposes_every_model_safe_new_operation() -> None:
         "/user/collections": "user_collections",
         "/user/favlists": "user_favlists",
         "/user/favlist-contents": "favlist_contents",
+        "/user/question-recommendations": "question_recommendations",
+        "/content/question-answers": "question_answers",
+        "/user/content-detail": "user_content_detail",
+        "/user/content-comments": "user_content_comments",
+        "/user/creator-account-stats": "creator_account_stats",
+        "/user/creator-content-stats": "creator_content_stats",
         "/knowledge/bases": "knowledge_bases",
         "/knowledge/items": "knowledge_items",
         "/knowledge/search": "knowledge_search",
@@ -70,11 +76,16 @@ def test_openapi_exposes_every_model_safe_new_operation() -> None:
         "global_search",
         "zhihu_search",
         "hot_list",
-        "user_data",
+        "question_answers",
         "zhida_openai",
-        "knowledge",
         "tools",
+        "knowledge",
+        "user_data",
+        "creator",
     ]
+    detail_schema = schema["components"]["schemas"]["ContentDetailRequest"]
+    assert "oauth_token" not in detail_schema["properties"]
+    assert "use_configured_oauth_user" not in detail_schema["properties"]
     user_schema = schema["components"]["schemas"]["UserContentsRequest"]
     assert "oauth_token" not in user_schema["properties"]
     assert "use_configured_oauth_user" in user_schema["properties"]

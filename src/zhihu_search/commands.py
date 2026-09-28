@@ -251,6 +251,99 @@ async def run_user_favlists(
     )
 
 
+async def run_question_recommendations(
+    query: str | None = None,
+    count: int = 5,
+    client: ZhihuRestClient | None = None,
+) -> CommandResult:
+    """按画像或主题推荐适合回答的问题。``query`` 为 None 时按画像推荐。"""
+    return await _run_command(
+        lambda own: own.question_recommendations(query=query, count=count),
+        client,
+    )
+
+
+async def run_question_answers(
+    question_url: str,
+    offset: int | str = 0,
+    limit: int = 20,
+    client: ZhihuRestClient | None = None,
+) -> CommandResult:
+    """获取一个知乎问题下的回答摘要。"""
+    return await _run_command(
+        lambda own: own.question_answers(
+            question_url,
+            offset=offset,
+            limit=limit,
+        ),
+        client,
+    )
+
+
+async def run_user_content_detail(
+    content_url: str,
+    client: ZhihuRestClient | None = None,
+) -> CommandResult:
+    """获取当前 Access Secret 所属用户的创作全文。"""
+    return await _run_command(
+        lambda own: own.user_content_detail(content_url),
+        client,
+    )
+
+
+async def run_user_content_comments(
+    content_url: str,
+    offset: int | str = 0,
+    limit: int = 20,
+    order: str = "score",
+    client: ZhihuRestClient | None = None,
+) -> CommandResult:
+    """获取当前账号创作内容下的评论。"""
+    return await _run_command(
+        lambda own: own.user_content_comments(
+            content_url,
+            offset=offset,
+            limit=limit,
+            order=order,
+        ),
+        client,
+    )
+
+
+async def run_creator_account_stats(
+    content_type: str = "all",
+    start_date: str | None = None,
+    end_date: str | None = None,
+    client: ZhihuRestClient | None = None,
+) -> CommandResult:
+    """获取当前账号的创作统计。"""
+    return await _run_command(
+        lambda own: own.creator_account_stats(
+            content_type=content_type,
+            start_date=start_date,
+            end_date=end_date,
+        ),
+        client,
+    )
+
+
+async def run_creator_content_stats(
+    content_url: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    client: ZhihuRestClient | None = None,
+) -> CommandResult:
+    """获取当前账号单篇创作的统计。"""
+    return await _run_command(
+        lambda own: own.creator_content_stats(
+            content_url,
+            start_date=start_date,
+            end_date=end_date,
+        ),
+        client,
+    )
+
+
 async def run_favlist_contents(
     *,
     favlist_url_token: int | None = None,

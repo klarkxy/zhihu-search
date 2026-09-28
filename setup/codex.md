@@ -29,8 +29,9 @@ codex mcp get zhihu
 检查结果应显示服务已启用，命令为 `uvx`，参数包含
 `zhihu-search serve --tools compact`。新建任务后工具才会进入新目录。
 
-`compact` 是默认档位；知识库选 `knowledge`，用户数据选 `user`，PDF/PPT 选
-`office`，全部 17 个 MCP 工具选 `full`。详细语义见
+`compact` 是默认档位；知识库选 `knowledge`，用户数据选 `user`，问题发现选
+`questions`，创作能力选 `creator`，PDF/PPT 选 `office`，全部 23 个 MCP
+工具选 `full`。详细语义见
 [MCP 高频集成](README.md#2-mcp高频集成)。不要在 MCP 配置中添加知乎凭证。
 
 ## 3. 验证

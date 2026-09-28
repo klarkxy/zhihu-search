@@ -981,6 +981,7 @@ async def test_task_status_rejects_path_traversal_before_request(
         (40005, InvalidArguments),
         (40006, InvalidArguments),
         (50002, UpstreamUnavailable),
+        (30003, UpstreamUnavailable),
     ],
 )
 async def test_new_documented_error_code_mapping(
@@ -1013,3 +1014,185 @@ async def test_documented_error_code_mapping_survives_http_400() -> None:
         async with ZhihuRestClient(SECRET) as c:
             with pytest.raises(InvalidArguments, match="file is expired"):
                 await c.create_pdf_parse_task("file_expired")
+
+
+# ----------------------------------------------------------------------
+# 问题发现与创作能力
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_question_recommendations_omits_blank_query_and_sends_count() -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(
+            f"{BASE_URL}/api/v1/user/question_recommendations"
+        ).mock(return_value=httpx.Response(200, json=_envelope(data={"Items": []})))
+        async with ZhihuRestClient(SECRET) as c:
+            await c.question_recommendations(count=5)
+
+    params = route.calls.last.request.url.params
+    assert "Query" not in params
+    assert params["Count"] == "5"
+    assert "X-OAuth-Token" not in route.calls.last.request.headers
+
+
+@pytest.mark.asyncio
+async def test_question_recommendations_sends_stripped_theme() -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(
+            f"{BASE_URL}/api/v1/user/question_recommendations"
+        ).mock(return_value=httpx.Response(200, json=_envelope()))
+        async with ZhihuRestClient(SECRET) as c:
+            await c.question_recommendations(query="  AI Agent  ", count=3)
+
+    assert route.calls.last.request.url.params["Query"] == "AI Agent"
+    assert route.calls.last.request.url.params["Count"] == "3"
+
+
+@pytest.mark.asyncio
+async def test_question_recommendations_rejects_whitespace_without_request() -> None:
+    async with ZhihuRestClient(SECRET) as c:
+        with pytest.raises(InvalidArguments, match="画像推荐"):
+            await c.question_recommendations(query="   ")
+
+
+@pytest.mark.asyncio
+async def test_question_answers_contract() -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(f"{BASE_URL}/api/v1/content/question_answers").mock(
+            return_value=httpx.Response(
+                200,
+                json=_envelope(
+                    data={
+                        "Items": [
+                            {
+                                "ContentType": "answer",
+                                "ContentToken": "456",
+                                "Url": "https://www.zhihu.com/question/123/answer/456",
+                                "Summary": "摘要",
+                            }
+                        ],
+                        "Paging": {"IsEnd": False, "NextOffset": 20, "Totals": 3},
+                    }
+                ),
+            )
+        )
+        async with ZhihuRestClient(SECRET) as c:
+            result = await c.question_answers(
+                "https://www.zhihu.com/question/123/",
+                offset="20",
+                limit=20,
+            )
+
+    params = route.calls.last.request.url.params
+    assert params["QuestionUrl"] == "https://www.zhihu.com/question/123/"
+    assert params["Offset"] == "20"
+    assert params["Limit"] == "20"
+    assert result.data["Paging"]["NextOffset"] == 20
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question_url",
+    [
+        "https://www.zhihu.com/question/123/answer/456",
+        "http://www.zhihu.com/question/123",
+        "https://example.com/question/123",
+        "",
+    ],
+)
+async def test_question_answers_rejects_undocumented_urls(question_url: str) -> None:
+    async with ZhihuRestClient(SECRET) as c:
+        with pytest.raises(InvalidArguments):
+            await c.question_answers(question_url)
+
+
+@pytest.mark.asyncio
+async def test_content_detail_and_comments_use_documented_urls() -> None:
+    with respx.mock(assert_all_called=True) as router:
+        detail = router.get(f"{BASE_URL}/api/v1/user/content_detail").mock(
+            return_value=httpx.Response(
+                200,
+                json=_envelope(
+                    data={
+                        "ContentType": "pin",
+                        "ContentToken": "9",
+                        "Url": "https://www.zhihu.com/pin/9",
+                        "Title": "",
+                        "Body": "<p>正文</p><script>alert(1)</script>",
+                    }
+                ),
+            )
+        )
+        comments = router.get(f"{BASE_URL}/api/v1/user/content_comments").mock(
+            return_value=httpx.Response(200, json=_envelope(data={"Items": []}))
+        )
+        async with ZhihuRestClient(SECRET) as c:
+            await c.user_content_detail(" https://www.zhihu.com/pin/9 ")
+            await c.user_content_comments(
+                "https://zhuanlan.zhihu.com/p/123",
+                offset=0,
+                limit=10,
+                order="reverse",
+            )
+
+    assert detail.calls.last.request.url.params["ContentUrl"] == (
+        "https://www.zhihu.com/pin/9"
+    )
+    comment_params = comments.calls.last.request.url.params
+    assert comment_params["ContentUrl"] == "https://zhuanlan.zhihu.com/p/123"
+    assert comment_params["Order"] == "reverse"
+    assert comment_params["Limit"] == "10"
+    assert "X-OAuth-Token" not in comments.calls.last.request.headers
+
+
+@pytest.mark.asyncio
+async def test_creator_stats_require_paired_dates_and_known_types() -> None:
+    async with ZhihuRestClient(SECRET) as c:
+        with pytest.raises(InvalidArguments, match="同时"):
+            await c.creator_account_stats(start_date="2026-09-01")
+        with pytest.raises(InvalidArguments, match="早于"):
+            await c.creator_account_stats(
+                start_date="2026-09-08",
+                end_date="2026-09-01",
+            )
+        with pytest.raises(InvalidArguments, match="content_type"):
+            await c.creator_account_stats(content_type="question")  # type: ignore[arg-type]
+
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(
+            f"{BASE_URL}/api/v1/user/creator_account_stats"
+        ).mock(return_value=httpx.Response(200, json=_envelope(data={})))
+        content = router.get(
+            f"{BASE_URL}/api/v1/user/creator_content_stats"
+        ).mock(return_value=httpx.Response(200, json=_envelope(data={"Items": []})))
+        async with ZhihuRestClient(SECRET) as c:
+            await c.creator_account_stats(content_type="article")
+            await c.creator_content_stats(
+                "https://www.zhihu.com/zvideo/8",
+                start_date="2026-09-01",
+                end_date="2026-09-08",
+            )
+
+    account_params = route.calls.last.request.url.params
+    assert account_params["ContentType"] == "article"
+    assert "StartDate" not in account_params
+    content_params = content.calls.last.request.url.params
+    assert content_params["ContentUrl"] == "https://www.zhihu.com/zvideo/8"
+    assert content_params["StartDate"] == "2026-09-01"
+    assert content_params["EndDate"] == "2026-09-08"
+
+
+@pytest.mark.asyncio
+async def test_risk_control_code_is_not_a_retryable_rate_limit() -> None:
+    with respx.mock(assert_all_called=True) as router:
+        router.get(f"{BASE_URL}/api/v1/user/question_recommendations").mock(
+            return_value=httpx.Response(
+                200,
+                json=_envelope(code=30003, message="risk"),
+            )
+        )
+        async with ZhihuRestClient(SECRET) as c:
+            with pytest.raises(UpstreamUnavailable, match="不要立即重试") as exc_info:
+                await c.question_recommendations()
+    assert not isinstance(exc_info.value, RateLimited)

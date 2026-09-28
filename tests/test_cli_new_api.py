@@ -215,6 +215,66 @@ def test_parser_accepts_knowledge_search_contract() -> None:
     assert args.limit == 8
 
 
+def test_parser_accepts_question_and_creator_commands() -> None:
+    parser = cli._build_parser()
+    recommendations = parser.parse_args(
+        ["question-recommendations", "--query", "AI Agent", "--count", "8"]
+    )
+    assert recommendations.query == "AI Agent"
+    assert recommendations.count == 8
+
+    profile = parser.parse_args(["question-recommendations"])
+    assert profile.query == ""
+
+    comments = parser.parse_args(
+        [
+            "user-content-comments",
+            "https://www.zhihu.com/pin/9",
+            "--order",
+            "ascending",
+            "--offset",
+            "20",
+        ]
+    )
+    assert comments.order == "ascending"
+    assert comments.offset == "20"
+
+    stats = parser.parse_args(
+        [
+            "creator-account-stats",
+            "--content-type",
+            "pin",
+            "--start-date",
+            "2026-09-01",
+            "--end-date",
+            "2026-09-08",
+            "--format",
+            "json",
+        ]
+    )
+    assert stats.content_type == "pin"
+    assert stats.start_date == "2026-09-01"
+
+
+def test_question_recommendations_json_dispatch(capsys) -> None:
+    run_question_recommendations = AsyncMock(
+        return_value=CommandResult(success=True, data={"Items": []})
+    )
+    with patch.object(
+        cli.commands,
+        "run_question_recommendations",
+        new=run_question_recommendations,
+    ):
+        exit_code = cli.main(
+            ["question-recommendations", "--format", "json"]
+        )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "question_recommendations"
+    assert run_question_recommendations.await_args.kwargs["query"] is None
+
+
 def test_parser_requires_one_favlist_identifier() -> None:
     parser = cli._build_parser()
     with pytest.raises(SystemExit):

@@ -2,9 +2,11 @@
 
 接口规范（参见 https://developer.zhihu.com/docs）：
 
-- 内容能力：知乎搜索、全网搜索、热榜、直答。
+- 内容能力：知乎搜索、全网搜索、热榜、直答、问题回答摘要。
 - 账号能力：查询官方每日额度。
 - 用户能力：创作内容、关注、近期收藏、收藏夹及收藏夹内容。
+- 问题发现：按画像或主题推荐适合回答的问题。
+- 创作能力：本人全文、评论、账号统计与单篇统计。
 - 知识库能力：列表、内容、文件上传与 RAG 检索。
 - 文件能力：PDF 上传与解析任务。
 - 生成能力：根据知乎回答或文章创建 PPT 任务。
@@ -23,6 +25,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal, Optional
 from urllib.parse import quote, urlparse
@@ -55,6 +58,7 @@ _CODE_TO_ERROR: dict[int, type[McpError]] = {
     40006: InvalidArguments,    # 文件解析失败
     50002: UpstreamUnavailable, # 知识库检索失败
     90001: UpstreamUnavailable, # 内部错误
+    # 30003 风控拒绝在解析时单独提示，不归入可等待的限流。
 }
 
 # 直答模型档位（OpenAI 兼容）
@@ -70,17 +74,23 @@ OfficialQuotaId = Literal[
     "global_search",
     "zhihu_search",
     "hot_list",
-    "user_data",
+    "question_answers",
     "zhida_openai",
-    "knowledge",
     "tools",
+    "knowledge",
+    "user_data",
+    "creator",
 ]
+CreatorContentType = Literal["all", "answer", "article", "pin", "zvideo"]
+CommentOrder = Literal["score", "reverse", "ascending"]
 
 # 各接口的参数上下界
 ZHIHU_SEARCH_MAX = 10
 GLOBAL_SEARCH_MAX = 20
 HOT_LIST_MAX = 30
 USER_PAGE_MAX = 50
+QUESTION_RECOMMENDATIONS_MAX = 20
+QUESTION_RECOMMENDATIONS_DEFAULT = 5
 KNOWLEDGE_ITEMS_MAX = 20
 KNOWLEDGE_SEARCH_MAX = 10
 PDF_MAX_BYTES = 100 * 1024 * 1024
@@ -93,10 +103,12 @@ OFFICIAL_QUOTA_IDS: tuple[OfficialQuotaId, ...] = (
     "global_search",
     "zhihu_search",
     "hot_list",
-    "user_data",
+    "question_answers",
     "zhida_openai",
-    "knowledge",
     "tools",
+    "knowledge",
+    "user_data",
+    "creator",
 )
 
 DEFAULT_TIMEOUT = 30.0
@@ -106,6 +118,10 @@ KNOWLEDGE_UPLOAD_TIMEOUT = 180.0  # 同步解析，大文件可能较慢
 _USER_CONTENT_TYPES = frozenset(
     {"all", "answer", "article", "zvideo", "pin", "question"}
 )
+_CREATOR_CONTENT_TYPES = frozenset(
+    {"all", "answer", "article", "pin", "zvideo"}
+)
+_COMMENT_ORDERS = frozenset({"score", "reverse", "ascending"})
 _USER_SORT_FIELDS = frozenset({"like_count", "ts"})
 _SORT_ORDERS = frozenset({"asc", "desc"})
 _KNOWLEDGE_SCOPES = frozenset({"all", "created", "subscribed"})
@@ -159,6 +175,14 @@ _ZHIHU_ANSWER_PATHS = (
     re.compile(r"^/question/[0-9]+/answer/[0-9]+/?$"),
 )
 _ZHIHU_ARTICLE_PATH = re.compile(r"^/p/[0-9]+/?$")
+_ZHIHU_QUESTION_PATH = re.compile(r"^/question/[0-9]+/?$")
+_CREATOR_WWW_PATHS = (
+    re.compile(r"^/answer/[0-9]+/?$"),
+    re.compile(r"^/question/[0-9]+/answer/[0-9]+/?$"),
+    re.compile(r"^/pin/[0-9]+/?$"),
+    re.compile(r"^/zvideo/[0-9]+/?$"),
+)
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PDF_TASK_ID = re.compile(r"^pdf_[A-Za-z0-9_-]+$")
 _PPT_TASK_ID = re.compile(r"^ppt_[A-Za-z0-9_-]+$")
 
@@ -308,6 +332,11 @@ class ZhihuRestClient:
                 f"{path} 返回了无法识别的错误码：{code!r}"
             ) from exc
         if numeric_code != 0:
+            if numeric_code == 30003:
+                msg = body.get("Message") or "请求被风控拒绝"
+                raise UpstreamUnavailable(
+                    f"{path} 被风控拒绝：{msg}。请不要立即重试"
+                )
             err_cls = _CODE_TO_ERROR.get(numeric_code, UpstreamUnavailable)
             msg = body.get("Message") or "未知错误"
             if err_cls is RateLimited:
@@ -511,6 +540,139 @@ class ZhihuRestClient:
             "/api/v1/user/favlist_contents",
             params,
             oauth_token=oauth_token,
+        )
+
+    # ------------------------------------------------------------------
+    # 问题发现与创作能力（仅当前 Access Secret，不接受 OAuth 切换）
+    # ------------------------------------------------------------------
+
+    async def question_recommendations(
+        self,
+        query: str | None = None,
+        count: int = QUESTION_RECOMMENDATIONS_DEFAULT,
+    ) -> ApiResult:
+        """推荐适合回答的知乎问题。
+
+        ``query`` 为 ``None`` 时按当前用户画像推荐，不会发送 ``Query``。
+        传入字符串时按主题推荐；空白字符串与省略含义不同，会在本地拒绝。
+        """
+        params: dict[str, Any] = {}
+        if query is not None:
+            if not isinstance(query, str):
+                raise InvalidArguments("query 必须是字符串")
+            theme = query.strip()
+            if not theme:
+                raise InvalidArguments(
+                    "主题关键词去除首尾空白后不能为空；省略 query 才会按画像推荐"
+                )
+            params["Query"] = theme
+        self._validate_limit(
+            count,
+            maximum=QUESTION_RECOMMENDATIONS_MAX,
+            name="count",
+        )
+        params["Count"] = count
+        return await self._envelope_get(
+            "/api/v1/user/question_recommendations",
+            params,
+        )
+
+    async def question_answers(
+        self,
+        question_url: str,
+        *,
+        offset: int | str = 0,
+        limit: int = 20,
+    ) -> ApiResult:
+        """获取一个知乎问题下的回答摘要。
+
+        ``Offset`` / ``NextOffset`` 是非负 Int64。本方法只发一页，
+        不根据过滤后的条数自行翻页。
+        """
+        normalized = self._validate_question_url(question_url)
+        numeric_offset = self._validate_numeric_offset(offset)
+        self._validate_limit(limit, maximum=USER_PAGE_MAX)
+        return await self._envelope_get(
+            "/api/v1/content/question_answers",
+            {
+                "QuestionUrl": normalized,
+                "Offset": numeric_offset,
+                "Limit": limit,
+            },
+        )
+
+    async def user_content_detail(self, content_url: str) -> ApiResult:
+        """获取当前账号已发布创作的全文。不接受 OAuth 身份切换。"""
+        normalized = self._validate_creator_content_url(content_url)
+        return await self._envelope_get(
+            "/api/v1/user/content_detail",
+            {"ContentUrl": normalized},
+        )
+
+    async def user_content_comments(
+        self,
+        content_url: str,
+        *,
+        offset: int | str = 0,
+        limit: int = 20,
+        order: CommentOrder = "score",
+    ) -> ApiResult:
+        """分页获取当前账号已发布创作下的根评论及附带子评论。"""
+        normalized = self._validate_creator_content_url(content_url)
+        if not isinstance(order, str) or order not in _COMMENT_ORDERS:
+            raise InvalidArguments("order 必须是 score、reverse 或 ascending")
+        numeric_offset = self._validate_numeric_offset(offset)
+        self._validate_limit(limit, maximum=USER_PAGE_MAX)
+        return await self._envelope_get(
+            "/api/v1/user/content_comments",
+            {
+                "ContentUrl": normalized,
+                "Offset": numeric_offset,
+                "Limit": limit,
+                "Order": order,
+            },
+        )
+
+    async def creator_account_stats(
+        self,
+        *,
+        content_type: CreatorContentType = "all",
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> ApiResult:
+        """获取当前账号的创作统计。日期必须成对提供，省略则使用上游默认范围。"""
+        if (
+            not isinstance(content_type, str)
+            or content_type not in _CREATOR_CONTENT_TYPES
+        ):
+            raise InvalidArguments(
+                "content_type 必须是 all、answer、article、pin 或 zvideo"
+            )
+        params: dict[str, Any] = {"ContentType": content_type}
+        date_pair = self._validate_date_pair(start_date, end_date)
+        if date_pair is not None:
+            params["StartDate"], params["EndDate"] = date_pair
+        return await self._envelope_get(
+            "/api/v1/user/creator_account_stats",
+            params,
+        )
+
+    async def creator_content_stats(
+        self,
+        content_url: str,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> ApiResult:
+        """获取当前账号单篇已发布创作的统计。"""
+        normalized = self._validate_creator_content_url(content_url)
+        params: dict[str, Any] = {"ContentUrl": normalized}
+        date_pair = self._validate_date_pair(start_date, end_date)
+        if date_pair is not None:
+            params["StartDate"], params["EndDate"] = date_pair
+        return await self._envelope_get(
+            "/api/v1/user/creator_content_stats",
+            params,
         )
 
     # ------------------------------------------------------------------
@@ -858,16 +1020,74 @@ class ZhihuRestClient:
             raise InvalidArguments("offset 必须是非负整数或非空字符串")
 
     @staticmethod
-    def _validate_limit(limit: int, *, maximum: int | None = None) -> None:
+    def _validate_limit(
+        limit: int,
+        *,
+        maximum: int | None = None,
+        name: str = "limit",
+    ) -> None:
         if (
             isinstance(limit, bool)
             or not isinstance(limit, int)
             or limit < 1
             or limit > INT64_MAX
         ):
-            raise InvalidArguments("limit 必须是正整数")
+            raise InvalidArguments(f"{name} 必须是正整数")
         if maximum is not None and limit > maximum:
-            raise InvalidArguments(f"limit 不能超过 {maximum}")
+            raise InvalidArguments(f"{name} 不能超过 {maximum}")
+
+    @staticmethod
+    def _validate_numeric_offset(offset: int | str) -> int:
+        """问题回答与创作评论的 Offset 是非负 Int64，不是不透明游标。"""
+        if isinstance(offset, bool):
+            raise InvalidArguments("offset 必须是非负 Int64")
+        if isinstance(offset, int):
+            value = offset
+        elif isinstance(offset, str) and offset.isdigit():
+            value = int(offset)
+        else:
+            raise InvalidArguments("offset 必须是非负 Int64")
+        if value > INT64_MAX:
+            raise InvalidArguments("offset 超出 Int64 非负整数范围")
+        return value
+
+    @staticmethod
+    def _validate_date_pair(
+        start_date: str | None,
+        end_date: str | None,
+    ) -> tuple[str, str] | None:
+        if start_date is None and end_date is None:
+            return None
+        if not start_date or not end_date:
+            raise InvalidArguments(
+                "start_date 与 end_date 必须同时提供或同时省略"
+            )
+        start = ZhihuRestClient._parse_iso_date(start_date, name="start_date")
+        end = ZhihuRestClient._parse_iso_date(end_date, name="end_date")
+        if end < start:
+            raise InvalidArguments("end_date 不得早于 start_date")
+        return start.isoformat(), end.isoformat()
+
+    @staticmethod
+    def _parse_iso_date(value: str, *, name: str) -> date:
+        if not isinstance(value, str) or _ISO_DATE.fullmatch(value) is None:
+            raise InvalidArguments(f"{name} 必须是 YYYY-MM-DD")
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise InvalidArguments(f"{name} 不是有效公历日期") from exc
+
+    @classmethod
+    def _parse_https_zhihu(cls, value: str, *, name: str):
+        cls._validate_nonempty_string(value, name=name)
+        try:
+            parsed = urlparse(value)
+            hostname = parsed.hostname
+        except ValueError as exc:
+            raise InvalidArguments(f"{name} 不是有效 URL") from exc
+        if parsed.scheme != "https" or hostname is None:
+            raise InvalidArguments(f"{name} 必须是 HTTPS 知乎链接")
+        return parsed
 
     @staticmethod
     def _validate_positive_int(value: int, *, name: str) -> None:
@@ -943,14 +1163,8 @@ class ZhihuRestClient:
 
     @classmethod
     def _validate_zhihu_resource_url(cls, resource_url: str) -> None:
-        cls._validate_nonempty_string(resource_url, name="resource_url")
-        try:
-            parsed = urlparse(resource_url)
-            hostname = parsed.hostname
-        except ValueError as exc:
-            raise InvalidArguments("resource_url 不是有效 URL") from exc
-        if parsed.scheme != "https" or hostname is None:
-            raise InvalidArguments("resource_url 必须是 HTTPS 知乎链接")
+        parsed = cls._parse_https_zhihu(resource_url, name="resource_url")
+        hostname = parsed.hostname
         if hostname == "www.zhihu.com" and any(
             pattern.fullmatch(parsed.path) for pattern in _ZHIHU_ANSWER_PATHS
         ):
@@ -962,6 +1176,37 @@ class ZhihuRestClient:
             return
         raise InvalidArguments(
             "resource_url 仅支持知乎回答或知乎专栏文章链接"
+        )
+
+    @classmethod
+    def _validate_question_url(cls, question_url: str) -> str:
+        cleaned = question_url.strip() if isinstance(question_url, str) else question_url
+        parsed = cls._parse_https_zhihu(cleaned, name="question_url")
+        if (
+            parsed.hostname == "www.zhihu.com"
+            and _ZHIHU_QUESTION_PATH.fullmatch(parsed.path)
+        ):
+            return cleaned
+        raise InvalidArguments(
+            "question_url 必须是 https://www.zhihu.com/question/{id} 形式的问题链接"
+        )
+
+    @classmethod
+    def _validate_creator_content_url(cls, content_url: str) -> str:
+        cleaned = content_url.strip() if isinstance(content_url, str) else content_url
+        parsed = cls._parse_https_zhihu(cleaned, name="content_url")
+        hostname = parsed.hostname
+        if hostname == "www.zhihu.com" and any(
+            pattern.fullmatch(parsed.path) for pattern in _CREATOR_WWW_PATHS
+        ):
+            return cleaned
+        if (
+            hostname == "zhuanlan.zhihu.com"
+            and _ZHIHU_ARTICLE_PATH.fullmatch(parsed.path)
+        ):
+            return cleaned
+        raise InvalidArguments(
+            "content_url 仅支持知乎回答、专栏文章、想法或视频链接"
         )
 
 
@@ -978,7 +1223,11 @@ __all__ = [
     "GLOBAL_SEARCH_MAX",
     "HOT_LIST_MAX",
     "USER_PAGE_MAX",
+    "QUESTION_RECOMMENDATIONS_MAX",
+    "QUESTION_RECOMMENDATIONS_DEFAULT",
     "KNOWLEDGE_ITEMS_MAX",
+    "CreatorContentType",
+    "CommentOrder",
     "KNOWLEDGE_SEARCH_MAX",
     "PDF_MAX_BYTES",
     "KNOWLEDGE_FILE_MAX_BYTES",

@@ -390,3 +390,29 @@ async def test_run_ppt_create_passes_task_options():
         num_pages=15,
         idempotency_key="ppt-key",
     )
+
+
+@pytest.mark.asyncio
+async def test_run_creator_commands_pass_new_contracts():
+    mock_client = MagicMock()
+    mock_client.question_recommendations = AsyncMock(
+        return_value=_mock_api_result({"Items": []})
+    )
+    mock_client.creator_content_stats = AsyncMock(
+        return_value=_mock_api_result({"Items": []})
+    )
+
+    await commands.run_question_recommendations(query=None, count=5, client=mock_client)
+    await commands.run_creator_content_stats(
+        "https://www.zhihu.com/pin/1",
+        start_date="2026-09-01",
+        end_date="2026-09-02",
+        client=mock_client,
+    )
+
+    mock_client.question_recommendations.assert_awaited_once_with(query=None, count=5)
+    mock_client.creator_content_stats.assert_awaited_once_with(
+        "https://www.zhihu.com/pin/1",
+        start_date="2026-09-01",
+        end_date="2026-09-02",
+    )

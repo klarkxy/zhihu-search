@@ -6,6 +6,8 @@
     trending → 热榜
     quota    → 知乎开放平台官方每日额度
     user_*   → 用户公开内容、关注与收藏
+    question_* → 适合回答的问题推荐，以及问题下的回答摘要
+    creator_* / user_content_* → 本人全文、评论与创作统计
     knowledge_* → 知识库列表、内容与检索（上传留在本机 CLI）
     pdf_*    → PDF 解析任务创建/查询（上传留在本机 CLI）
     ppt_*    → PPT 生成任务创建/查询
@@ -86,6 +88,20 @@ USER_MCP_TOOL_NAMES = frozenset(
         "favlist_contents",
     }
 )
+QUESTION_MCP_TOOL_NAMES = frozenset(
+    {
+        "question_recommendations",
+        "question_answers",
+    }
+)
+CREATOR_MCP_TOOL_NAMES = frozenset(
+    {
+        "user_content_detail",
+        "user_content_comments",
+        "creator_account_stats",
+        "creator_content_stats",
+    }
+)
 KNOWLEDGE_MCP_TOOL_NAMES = frozenset(
     {
         "knowledge_bases",
@@ -104,6 +120,8 @@ OFFICE_MCP_TOOL_NAMES = frozenset(
 ACCOUNT_MCP_TOOL_NAMES = frozenset({"quota"})
 OPTIONAL_MCP_TOOL_NAMES = (
     USER_MCP_TOOL_NAMES
+    | QUESTION_MCP_TOOL_NAMES
+    | CREATOR_MCP_TOOL_NAMES
     | KNOWLEDGE_MCP_TOOL_NAMES
     | OFFICE_MCP_TOOL_NAMES
     | ACCOUNT_MCP_TOOL_NAMES
@@ -113,6 +131,8 @@ MCP_TOOL_PROFILES = {
     "compact": CORE_MCP_TOOL_NAMES,
     "knowledge": CORE_MCP_TOOL_NAMES | KNOWLEDGE_MCP_TOOL_NAMES,
     "user": CORE_MCP_TOOL_NAMES | USER_MCP_TOOL_NAMES,
+    "questions": CORE_MCP_TOOL_NAMES | QUESTION_MCP_TOOL_NAMES,
+    "creator": CORE_MCP_TOOL_NAMES | CREATOR_MCP_TOOL_NAMES,
     "office": CORE_MCP_TOOL_NAMES | OFFICE_MCP_TOOL_NAMES,
     "full": ALL_MCP_TOOL_NAMES,
 }
@@ -350,17 +370,19 @@ async def trending(
 )
 async def quota(
     api_ids: Annotated[
-        list[
-            Literal[
-                "global_search",
-                "zhihu_search",
-                "hot_list",
-                "user_data",
-                "zhida_openai",
-                "knowledge",
-                "tools",
+            list[
+                Literal[
+                    "global_search",
+                    "zhihu_search",
+                    "hot_list",
+                    "question_answers",
+                    "zhida_openai",
+                    "tools",
+                    "knowledge",
+                    "user_data",
+                    "creator",
+                ]
             ]
-        ]
         | None,
         Field(description="要查询的官方额度项；省略则返回全部。"),
     ] = None,
@@ -569,6 +591,218 @@ async def favlist_contents(
 
 
 @mcp.tool(
+    name="question_recommendations",
+    description=(
+        "推荐适合当前账号回答的知乎问题。省略 query 时按画像推荐，并不会把空字符串"
+        "发给上游；传入主题时按主题推荐。不支持翻页，返回条数可以少于 count。"
+        "与本人全文、评论和创作统计共用 creator 额度。不接受 OAuth 身份切换。"
+    ),
+)
+async def question_recommendations(
+    query: Annotated[
+        str | None,
+        Field(
+            description=(
+                "主题关键词。省略则按当前账号画像推荐；空白字符串无效。"
+            )
+        ),
+    ] = None,
+    count: Annotated[
+        int,
+        Field(ge=1, le=20, description="返回数量，默认 5。"),
+    ] = 5,
+) -> ToolResult:
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
+    result = await commands.run_question_recommendations(
+        query=query,
+        count=count,
+        client=client,
+    )
+    if not result.success:
+        return _err(result.error or "未知错误", result)
+    return _ok(formatters.format_question_recommendations(result.data), result)
+
+
+@mcp.tool(
+    name="question_answers",
+    description=(
+        "获取一个知乎问题下的回答摘要。Summary 不是回答全文，也不是 AI 摘要。"
+        "IsEnd=false 时把 NextOffset 原样作为下一次 offset；缺少 NextOffset 时停止翻页。"
+        "不要按本页条数计算偏移。使用 question_answers 额度。"
+    ),
+)
+async def question_answers(
+    question_url: Annotated[
+        str,
+        Field(min_length=1, description="https://www.zhihu.com/question/{id}"),
+    ],
+    offset: Annotated[
+        int,
+        Field(ge=0, description="非负 Int64 偏移，使用上一页 NextOffset。"),
+    ] = 0,
+    limit: Annotated[int, Field(ge=1, le=50, description="返回数量。")] = 20,
+) -> ToolResult:
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
+    result = await commands.run_question_answers(
+        question_url=question_url,
+        offset=offset,
+        limit=limit,
+        client=client,
+    )
+    if not result.success:
+        return _err(result.error or "未知错误", result)
+    return _ok(formatters.format_question_answers(result.data), result)
+
+
+@mcp.tool(
+    name="user_content_detail",
+    description=(
+        "读取当前 Access Secret 所属账号已发布回答、文章、想法或视频的全文。"
+        "不接受 OAuth 身份切换，也不能指定他人。视频只返回关联正文。"
+        "正文可能含 HTML，展示结果已做文本清洗。与 creator 额度共用。"
+    ),
+)
+async def user_content_detail(
+    content_url: Annotated[
+        str,
+        Field(min_length=1, description="本人的回答、文章、想法或视频链接。"),
+    ],
+) -> ToolResult:
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
+    result = await commands.run_user_content_detail(
+        content_url=content_url,
+        client=client,
+    )
+    if not result.success:
+        return _err(result.error or "未知错误", result)
+    return _ok(formatters.format_content_detail(result.data), result)
+
+
+@mcp.tool(
+    name="user_content_comments",
+    description=(
+        "分页读取当前账号已发布创作下的根评论及附带子评论。子评论不保证完整。"
+        "order 为 score、reverse 或 ascending。IsEnd=false 时使用 NextOffset；"
+        "缺少或不递增的 NextOffset 应停止翻页。不要因短页或空页停止。"
+        "不接受 OAuth 身份切换。与 creator 额度共用。"
+    ),
+)
+async def user_content_comments(
+    content_url: Annotated[
+        str,
+        Field(min_length=1, description="本人的回答、文章、想法或视频链接。"),
+    ],
+    offset: Annotated[
+        int,
+        Field(ge=0, description="非负 Int64 偏移，使用上一页 NextOffset。"),
+    ] = 0,
+    limit: Annotated[int, Field(ge=1, le=50, description="根评论数量。")] = 20,
+    order: Annotated[
+        Literal["score", "reverse", "ascending"],
+        Field(description="score 热度，reverse 时间倒序，ascending 时间正序。"),
+    ] = "score",
+) -> ToolResult:
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
+    result = await commands.run_user_content_comments(
+        content_url=content_url,
+        offset=offset,
+        limit=limit,
+        order=order,
+        client=client,
+    )
+    if not result.success:
+        return _err(result.error or "未知错误", result)
+    return _ok(formatters.format_content_comments(result.data), result)
+
+
+@mcp.tool(
+    name="creator_account_stats",
+    description=(
+        "读取当前账号的创作指标、创作数量、粉丝概览和可用受众画像。"
+        "content_type 为 all、answer、article、pin 或 zvideo。"
+        "start_date 与 end_date 必须同时提供或同时省略，格式 YYYY-MM-DD。"
+        "未返回的指标不要补零，比例不要换算成百分比。不接受 OAuth 身份切换。"
+    ),
+)
+async def creator_account_stats(
+    content_type: Annotated[
+        Literal["all", "answer", "article", "pin", "zvideo"],
+        Field(description="统计的内容类型。"),
+    ] = "all",
+    start_date: Annotated[
+        str | None,
+        Field(description="开始日期 YYYY-MM-DD，须与 end_date 成对提供。"),
+    ] = None,
+    end_date: Annotated[
+        str | None,
+        Field(description="结束日期 YYYY-MM-DD，不得早于 start_date。"),
+    ] = None,
+) -> ToolResult:
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
+    result = await commands.run_creator_account_stats(
+        content_type=content_type,
+        start_date=start_date or None,
+        end_date=end_date or None,
+        client=client,
+    )
+    if not result.success:
+        return _err(result.error or "未知错误", result)
+    return _ok(formatters.format_creator_account_stats(result.data), result)
+
+
+@mcp.tool(
+    name="creator_content_stats",
+    description=(
+        "读取当前账号单篇已发布创作的阅读、互动、转粉和可用受众画像。"
+        "空 Items 不等于各项指标为零。日期规则与账号统计相同。"
+        "未返回的指标不要补零。不接受 OAuth 身份切换。"
+    ),
+)
+async def creator_content_stats(
+    content_url: Annotated[
+        str,
+        Field(min_length=1, description="本人的回答、文章、想法或视频链接。"),
+    ],
+    start_date: Annotated[
+        str | None,
+        Field(description="开始日期 YYYY-MM-DD，须与 end_date 成对提供。"),
+    ] = None,
+    end_date: Annotated[
+        str | None,
+        Field(description="结束日期 YYYY-MM-DD，不得早于 start_date。"),
+    ] = None,
+) -> ToolResult:
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as e:
+        return _err(str(e))
+    result = await commands.run_creator_content_stats(
+        content_url=content_url,
+        start_date=start_date or None,
+        end_date=end_date or None,
+        client=client,
+    )
+    if not result.success:
+        return _err(result.error or "未知错误", result)
+    return _ok(formatters.format_creator_content_stats(result.data), result)
+
+
+@mcp.tool(
     name="knowledge_bases",
     description=(
         "获取当前用户创建或订阅的知乎直答知识库。"
@@ -771,8 +1005,9 @@ async def ppt_status(
     title="其他",
     description=(
         "按当前 MCP 会话展开或收起低频工具。action='enable' 展开：授权用户"
-        "自己的创作/关注/收藏数据、自建知识库内的私有文档检索、PDF 解析与 "
-        "PPT 生成；'disable' 收起；'reset' 恢复服务器启动配置。"
+        "自己的创作/关注/收藏数据、问题推荐与回答摘要、本人全文/评论/创作统计、"
+        "自建知识库内的私有文档检索、PDF 解析与 PPT 生成；"
+        "'disable' 收起；'reset' 恢复服务器启动配置。"
     ),
 )
 async def other(

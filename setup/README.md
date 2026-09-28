@@ -81,10 +81,12 @@ uvx zhihu-search serve --tools compact
 | `compact` | `search`、`ask`、`trending`、`other` |
 | `knowledge` | compact 加 3 个知识库工具 |
 | `user` | compact 加 5 个用户数据工具 |
+| `questions` | compact 加问题推荐和问题回答摘要 |
+| `creator` | compact 加全文、评论和 2 个创作统计工具 |
 | `office` | compact 加 4 个 PDF/PPT 工具 |
-| `full` | 16 个业务/账号工具加 `other`，共 17 个 |
+| `full` | 22 个业务/账号工具加 `other`，共 23 个 |
 
-`other` 可以在当前会话中展开、收起或复原 13 个低频工具。档位和工具名可用
+`other` 可以在当前会话中展开、收起或复原 19 个低频工具。档位和工具名可用
 逗号组合，例如 `knowledge,user` 或 `compact,knowledge_search`；只写工具名
 时则是严格 allowlist。`ZHIHU_MCP_TOOLS` 可设置默认值，命令行 `--tools`
 优先。

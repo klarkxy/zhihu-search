@@ -16,6 +16,9 @@ Commands (默认: serve):
     trending           查看知乎热榜
     quota              查询官方每日额度
     user-*             查询用户公开内容、关注与收藏
+    question-*         推荐问题或读取问题回答摘要
+    user-content-*     读取本人创作全文与评论
+    creator-*          查询本人账号或单篇创作数据
     knowledge-*        查询知识库、上传文件、检索文档
     pdf-* / ppt-*      上传文件、创建任务、查询任务状态
     oauth-*            生成授权 URL、交换 OAuth access token
@@ -85,8 +88,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(
         dest="command",
         metavar=(
-            "{install-skill,search,ask,trending,user-*,knowledge-*,"
-            "quota,pdf-*,ppt-*,oauth-*,serve,openwebui}"
+            "{install-skill,search,ask,trending,user-*,question-*,"
+            "creator-*,knowledge-*,quota,pdf-*,ppt-*,oauth-*,serve,openwebui}"
         ),
     )
 
@@ -123,9 +126,9 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="PROFILE_OR_LIST",
         default=None,
         help=(
-            "工具开关：档位 compact（默认）、knowledge、user、office、full，"
-            "或逗号分隔的档位与工具名混写（如 knowledge,user）；"
-            "也可设置 ZHIHU_MCP_TOOLS。"
+            "工具开关：档位 compact（默认）、knowledge、user、questions、"
+            "creator、office、full，或逗号分隔的档位与工具名混写"
+            "（如 knowledge,user）；也可设置 ZHIHU_MCP_TOOLS。"
         ),
     )
 
@@ -287,6 +290,126 @@ def _build_parser() -> argparse.ArgumentParser:
         help="可选 OAuth token；也可设置 ZHIHU_OAUTH_TOKEN。",
     )
     flc.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown",
+        help="输出格式。",
+    )
+
+    # --- 问题发现与创作能力（仅当前 Access Secret）---
+    qrec = sub.add_parser(
+        "question-recommendations",
+        help="按画像或主题推荐适合回答的知乎问题。",
+    )
+    qrec.add_argument(
+        "--query",
+        default="",
+        help="主题关键词。省略时按当前账号画像推荐；空白字符串会被拒绝。",
+    )
+    qrec.add_argument(
+        "--count",
+        type=int,
+        default=5,
+        help="返回数量，范围 1-20，默认 5。",
+    )
+    qrec.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown",
+        help="输出格式。",
+    )
+
+    qans = sub.add_parser(
+        "question-answers",
+        help="获取一个知乎问题下的回答摘要。",
+    )
+    qans.add_argument(
+        "question_url",
+        help="https://www.zhihu.com/question/{id} 形式的问题链接。",
+    )
+    qans.add_argument(
+        "--offset",
+        default="0",
+        help="非负 Int64 偏移；使用上一页 Paging.NextOffset，不要自行累加。",
+    )
+    qans.add_argument("--limit", type=int, default=20, help="返回数量，范围 1-50。")
+    qans.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown",
+        help="输出格式。",
+    )
+
+    ucd = sub.add_parser(
+        "user-content-detail",
+        help="获取当前账号已发布创作的全文。",
+    )
+    ucd.add_argument(
+        "content_url",
+        help="本人的回答、专栏文章、想法或视频链接。",
+    )
+    ucd.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown",
+        help="输出格式。",
+    )
+
+    ucm = sub.add_parser(
+        "user-content-comments",
+        help="获取当前账号创作内容下的评论。",
+    )
+    ucm.add_argument("content_url", help="本人的回答、专栏文章、想法或视频链接。")
+    ucm.add_argument(
+        "--offset",
+        default="0",
+        help="非负 Int64 偏移；使用上一页 Paging.NextOffset。",
+    )
+    ucm.add_argument("--limit", type=int, default=20, help="根评论数量，范围 1-50。")
+    ucm.add_argument(
+        "--order",
+        choices=["score", "reverse", "ascending"],
+        default="score",
+        help="score 热度，reverse 时间倒序，ascending 时间正序。",
+    )
+    ucm.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown",
+        help="输出格式。",
+    )
+
+    cas = sub.add_parser(
+        "creator-account-stats",
+        help="获取当前账号的创作数据。",
+    )
+    cas.add_argument(
+        "--content-type",
+        choices=["all", "answer", "article", "pin", "zvideo"],
+        default="all",
+        help="统计的内容类型。",
+    )
+    cas.add_argument(
+        "--start-date",
+        default="",
+        help="开始日期 YYYY-MM-DD，必须与 --end-date 同时提供。",
+    )
+    cas.add_argument(
+        "--end-date",
+        default="",
+        help="结束日期 YYYY-MM-DD，不得早于开始日期。",
+    )
+    cas.add_argument(
+        "--format", choices=["markdown", "json"], default="markdown",
+        help="输出格式。",
+    )
+
+    ccs = sub.add_parser(
+        "creator-content-stats",
+        help="获取当前账号单篇创作的数据。",
+    )
+    ccs.add_argument("content_url", help="本人的回答、专栏文章、想法或视频链接。")
+    ccs.add_argument(
+        "--start-date",
+        default="",
+        help="开始日期 YYYY-MM-DD，必须与 --end-date 同时提供。",
+    )
+    ccs.add_argument(
+        "--end-date",
+        default="",
+        help="结束日期 YYYY-MM-DD，不得早于开始日期。",
+    )
+    ccs.add_argument(
         "--format", choices=["markdown", "json"], default="markdown",
         help="输出格式。",
     )
@@ -490,6 +613,18 @@ def _print_markdown(result: commands.CommandResult, kind: str, **fmt_kw: object)
         text = formatters.format_favlists(result.data)
     elif kind == "favlist_contents":
         text = formatters.format_content_items(result.data, heading="知乎收藏夹内容")
+    elif kind == "question_recommendations":
+        text = formatters.format_question_recommendations(result.data)
+    elif kind == "question_answers":
+        text = formatters.format_question_answers(result.data)
+    elif kind == "user_content_detail":
+        text = formatters.format_content_detail(result.data)
+    elif kind == "user_content_comments":
+        text = formatters.format_content_comments(result.data)
+    elif kind == "creator_account_stats":
+        text = formatters.format_creator_account_stats(result.data)
+    elif kind == "creator_content_stats":
+        text = formatters.format_creator_content_stats(result.data)
     elif kind == "knowledge_bases":
         text = formatters.format_knowledge_bases(result.data)
     elif kind == "knowledge_items":
@@ -602,6 +737,79 @@ async def _run_user_favlists(args: argparse.Namespace) -> int:
     if args.format == "json":
         return _print_json(result, "user_favlists")
     return _print_markdown(result, "user_favlists")
+
+
+def _optional_theme(value: str) -> str | None:
+    """空字符串表示省略主题；空白字符串留给客户端拒绝。"""
+    if value == "":
+        return None
+    return value
+
+
+def _optional_date(value: str) -> str | None:
+    return value or None
+
+
+async def _run_question_recommendations(args: argparse.Namespace) -> int:
+    result = await commands.run_question_recommendations(
+        query=_optional_theme(args.query),
+        count=args.count,
+    )
+    if args.format == "json":
+        return _print_json(result, "question_recommendations")
+    return _print_markdown(result, "question_recommendations")
+
+
+async def _run_question_answers(args: argparse.Namespace) -> int:
+    result = await commands.run_question_answers(
+        question_url=args.question_url,
+        offset=args.offset,
+        limit=args.limit,
+    )
+    if args.format == "json":
+        return _print_json(result, "question_answers")
+    return _print_markdown(result, "question_answers")
+
+
+async def _run_user_content_detail(args: argparse.Namespace) -> int:
+    result = await commands.run_user_content_detail(content_url=args.content_url)
+    if args.format == "json":
+        return _print_json(result, "user_content_detail")
+    return _print_markdown(result, "user_content_detail")
+
+
+async def _run_user_content_comments(args: argparse.Namespace) -> int:
+    result = await commands.run_user_content_comments(
+        content_url=args.content_url,
+        offset=args.offset,
+        limit=args.limit,
+        order=args.order,
+    )
+    if args.format == "json":
+        return _print_json(result, "user_content_comments")
+    return _print_markdown(result, "user_content_comments")
+
+
+async def _run_creator_account_stats(args: argparse.Namespace) -> int:
+    result = await commands.run_creator_account_stats(
+        content_type=args.content_type,
+        start_date=_optional_date(args.start_date),
+        end_date=_optional_date(args.end_date),
+    )
+    if args.format == "json":
+        return _print_json(result, "creator_account_stats")
+    return _print_markdown(result, "creator_account_stats")
+
+
+async def _run_creator_content_stats(args: argparse.Namespace) -> int:
+    result = await commands.run_creator_content_stats(
+        content_url=args.content_url,
+        start_date=_optional_date(args.start_date),
+        end_date=_optional_date(args.end_date),
+    )
+    if args.format == "json":
+        return _print_json(result, "creator_content_stats")
+    return _print_markdown(result, "creator_content_stats")
 
 
 async def _run_favlist_contents(args: argparse.Namespace) -> int:
@@ -864,6 +1072,18 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(_run_user_favlists(args))
         if args.command == "favlist-contents":
             return asyncio.run(_run_favlist_contents(args))
+        if args.command == "question-recommendations":
+            return asyncio.run(_run_question_recommendations(args))
+        if args.command == "question-answers":
+            return asyncio.run(_run_question_answers(args))
+        if args.command == "user-content-detail":
+            return asyncio.run(_run_user_content_detail(args))
+        if args.command == "user-content-comments":
+            return asyncio.run(_run_user_content_comments(args))
+        if args.command == "creator-account-stats":
+            return asyncio.run(_run_creator_account_stats(args))
+        if args.command == "creator-content-stats":
+            return asyncio.run(_run_creator_content_stats(args))
         if args.command == "knowledge-bases":
             return asyncio.run(_run_knowledge_bases(args))
         if args.command == "knowledge-items":

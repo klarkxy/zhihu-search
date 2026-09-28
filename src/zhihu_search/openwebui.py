@@ -114,12 +114,97 @@ class QuotaRequest(ToolRequest):
             "global_search",
             "zhihu_search",
             "hot_list",
-            "user_data",
+            "question_answers",
             "zhida_openai",
-            "knowledge",
             "tools",
+            "knowledge",
+            "user_data",
+            "creator",
         ]
     ] = Field(default_factory=list, description="要查询的官方额度项；空列表返回全部。")
+
+
+class QuestionRecommendationsRequest(ToolRequest):
+    """Question recommendation request. Omitted query uses the account profile."""
+
+    query: str | None = Field(
+        None,
+        description="主题关键词。省略时按当前账号画像推荐；空白字符串无效。",
+    )
+    count: int = Field(5, ge=1, le=20, description="返回数量，默认 5。")
+
+
+class QuestionAnswersRequest(ToolRequest):
+    """Question answer summary request."""
+
+    question_url: str = Field(
+        ...,
+        min_length=1,
+        description="https://www.zhihu.com/question/{id}",
+    )
+    offset: int = Field(0, ge=0, description="非负 Int64 偏移，使用上一页 NextOffset。")
+    limit: int = Field(20, ge=1, le=50, description="返回数量，最大 50。")
+
+
+class ContentDetailRequest(ToolRequest):
+    """Own published content body request. No OAuth identity switch."""
+
+    content_url: str = Field(
+        ...,
+        min_length=1,
+        description="本人的回答、文章、想法或视频链接。",
+    )
+
+
+class ContentCommentsRequest(ToolRequest):
+    """Own published content comments request."""
+
+    content_url: str = Field(
+        ...,
+        min_length=1,
+        description="本人的回答、文章、想法或视频链接。",
+    )
+    offset: int = Field(0, ge=0, description="非负 Int64 偏移，使用上一页 NextOffset。")
+    limit: int = Field(20, ge=1, le=50, description="根评论数量，最大 50。")
+    order: Literal["score", "reverse", "ascending"] = Field(
+        "score",
+        description="score 热度，reverse 时间倒序，ascending 时间正序。",
+    )
+
+
+class CreatorAccountStatsRequest(ToolRequest):
+    """Own account creator statistics request."""
+
+    content_type: Literal["all", "answer", "article", "pin", "zvideo"] = Field(
+        "all",
+        description="统计的内容类型。",
+    )
+    start_date: str | None = Field(
+        None,
+        description="开始日期 YYYY-MM-DD，须与 end_date 成对提供。",
+    )
+    end_date: str | None = Field(
+        None,
+        description="结束日期 YYYY-MM-DD，不得早于 start_date。",
+    )
+
+
+class CreatorContentStatsRequest(ToolRequest):
+    """Own single-content creator statistics request."""
+
+    content_url: str = Field(
+        ...,
+        min_length=1,
+        description="本人的回答、文章、想法或视频链接。",
+    )
+    start_date: str | None = Field(
+        None,
+        description="开始日期 YYYY-MM-DD，须与 end_date 成对提供。",
+    )
+    end_date: str | None = Field(
+        None,
+        description="结束日期 YYYY-MM-DD，不得早于 start_date。",
+    )
 
 
 class UserContentsRequest(UserDataRequest):
@@ -373,7 +458,7 @@ def create_app(api_key: str | None = None) -> FastAPI:
         version=__version__,
         description=(
             "知乎开放平台 OpenAPI 工具服务器，提供搜索、直答、热榜、"
-            "官方额度、用户公开数据、知识库以及 PDF/PPT 异步任务操作。"
+            "官方额度、用户公开数据、问题发现、创作能力、知识库以及 PDF/PPT 异步任务操作。"
         ),
         lifespan=lifespan,
     )
@@ -585,6 +670,154 @@ def create_app(api_key: str | None = None) -> FastAPI:
             else ""
         )
         return _response("favlist_contents", result, content)
+
+    @tool_router.post(
+        "/user/question-recommendations",
+        response_model=ToolResponse,
+        operation_id="question_recommendations",
+        summary="推荐适合当前账号回答的知乎问题",
+    )
+    async def question_recommendations(
+        request: QuestionRecommendationsRequest,
+    ) -> ToolResponse:
+        try:
+            client = _get_client()
+        except credentials.CredentialsError as e:
+            return _credentials_error("question_recommendations", e)
+        result = await commands.run_question_recommendations(
+            query=request.query,
+            count=request.count,
+            client=client,
+        )
+        content = (
+            formatters.format_question_recommendations(result.data)
+            if result.success
+            else ""
+        )
+        return _response("question_recommendations", result, content)
+
+    @tool_router.post(
+        "/content/question-answers",
+        response_model=ToolResponse,
+        operation_id="question_answers",
+        summary="获取知乎问题下的回答摘要",
+    )
+    async def question_answers(request: QuestionAnswersRequest) -> ToolResponse:
+        try:
+            client = _get_client()
+        except credentials.CredentialsError as e:
+            return _credentials_error("question_answers", e)
+        result = await commands.run_question_answers(
+            question_url=request.question_url,
+            offset=request.offset,
+            limit=request.limit,
+            client=client,
+        )
+        content = (
+            formatters.format_question_answers(result.data)
+            if result.success
+            else ""
+        )
+        return _response("question_answers", result, content)
+
+    @tool_router.post(
+        "/user/content-detail",
+        response_model=ToolResponse,
+        operation_id="user_content_detail",
+        summary="获取当前账号已发布创作的全文",
+    )
+    async def user_content_detail(request: ContentDetailRequest) -> ToolResponse:
+        try:
+            client = _get_client()
+        except credentials.CredentialsError as e:
+            return _credentials_error("user_content_detail", e)
+        result = await commands.run_user_content_detail(
+            content_url=request.content_url,
+            client=client,
+        )
+        content = (
+            formatters.format_content_detail(result.data) if result.success else ""
+        )
+        return _response("user_content_detail", result, content)
+
+    @tool_router.post(
+        "/user/content-comments",
+        response_model=ToolResponse,
+        operation_id="user_content_comments",
+        summary="获取当前账号创作内容下的评论",
+    )
+    async def user_content_comments(
+        request: ContentCommentsRequest,
+    ) -> ToolResponse:
+        try:
+            client = _get_client()
+        except credentials.CredentialsError as e:
+            return _credentials_error("user_content_comments", e)
+        result = await commands.run_user_content_comments(
+            content_url=request.content_url,
+            offset=request.offset,
+            limit=request.limit,
+            order=request.order,
+            client=client,
+        )
+        content = (
+            formatters.format_content_comments(result.data)
+            if result.success
+            else ""
+        )
+        return _response("user_content_comments", result, content)
+
+    @tool_router.post(
+        "/user/creator-account-stats",
+        response_model=ToolResponse,
+        operation_id="creator_account_stats",
+        summary="获取当前账号的创作数据",
+    )
+    async def creator_account_stats(
+        request: CreatorAccountStatsRequest,
+    ) -> ToolResponse:
+        try:
+            client = _get_client()
+        except credentials.CredentialsError as e:
+            return _credentials_error("creator_account_stats", e)
+        result = await commands.run_creator_account_stats(
+            content_type=request.content_type,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            client=client,
+        )
+        content = (
+            formatters.format_creator_account_stats(result.data)
+            if result.success
+            else ""
+        )
+        return _response("creator_account_stats", result, content)
+
+    @tool_router.post(
+        "/user/creator-content-stats",
+        response_model=ToolResponse,
+        operation_id="creator_content_stats",
+        summary="获取当前账号单篇创作的数据",
+    )
+    async def creator_content_stats(
+        request: CreatorContentStatsRequest,
+    ) -> ToolResponse:
+        try:
+            client = _get_client()
+        except credentials.CredentialsError as e:
+            return _credentials_error("creator_content_stats", e)
+        result = await commands.run_creator_content_stats(
+            content_url=request.content_url,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            client=client,
+        )
+        content = (
+            formatters.format_creator_content_stats(result.data)
+            if result.success
+            else ""
+        )
+        return _response("creator_content_stats", result, content)
 
     @tool_router.post(
         "/knowledge/bases",
