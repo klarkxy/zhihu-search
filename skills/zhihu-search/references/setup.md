@@ -69,20 +69,25 @@ args:    zhihu-search serve --tools compact
 A long-lived Codex host may retain one stdio process tree per task context until the host exits.
 Explain that lifecycle before changing an existing MCP registration.
 
-## DeepSeek Harness: install the same Skill
+## DeepSeek Harness
 
-For DSH, use the native profile bundle instead of editing a generic MCP config:
+This repository no longer ships a DSH plugin. Install the maintained package:
 
 ```bash
-dsh plugin --profile web add "github:klarkxy/zhihu-search"
-dsh --profile web --dump-config
+dsh plugin --profile web add @klarkxy/dsh-zhihu
 ```
 
-The composed config must contain one `zhihu-search-skill` row backed by
-`@deepseek-ai/dsh-skill-filesystem`. Restart the target profile after a persistent install, then
-verify that the Skill appears and performs one real query. The bundle must not start a persistent MCP server.
-Keep credentials in the existing per-user Python credential file; never
-add an Access Secret to the bundle, profile patch, or chat.
+Source and usage: <https://github.com/klarkxy/dsh-plugins/tree/main/plugins/dsh-zhihu>
+
+If the profile still has the old `dsh-plugin-zhihu-search` package, remove it after the new
+plugin is installed:
+
+```bash
+dsh plugin --profile web remove dsh-plugin-zhihu-search
+```
+
+Enter the Access Secret in the plugin settings (`ZHIHU_ACCESS_TOKEN`). Never add it to a profile
+patch or to chat.
 
 ## Diagnose
 

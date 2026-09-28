@@ -117,21 +117,20 @@ args:    zhihu-search serve --tools compact
 工具数量应为：compact 4 个、knowledge 7 个、office 8 个、user 9 个、
 questions 6 个、creator 8 个、full 23 个。不要擅自结束用户的客户端进程。
 
-## 3. DeepSeek Harness：安装同一份 Skill
+## 3. DeepSeek Harness：改用独立插件
 
-目标客户端是 DSH 时，用原生 bundle 代替通用 Skill 安装步骤：
+目标客户端是 DSH 时，安装
+[`@klarkxy/dsh-zhihu`](https://github.com/klarkxy/dsh-plugins/tree/main/plugins/dsh-zhihu)。
+本仓库不再提供 DSH 安装包。
 
 ```bash
-dsh plugin --profile web add "github:klarkxy/zhihu-search"
-dsh --profile web --dump-config
+dsh plugin --profile web add @klarkxy/dsh-zhihu
+dsh plugin --profile web remove dsh-plugin-zhihu-search
 ```
 
-配置结果应包含 `zhihu-search-skill` 和
-`@deepseek-ai/dsh-skill-filesystem`。持久安装后重启目标 profile，确认 Skill
-目录出现 `zhihu-search`，再让 Agent 按需执行一次真实查询。
-
-bundle 不保存知乎凭证，也不启动 MCP。不要手写 profile patch，也不要因为
-安装了 bundle 就再注册常驻 MCP。完整流程见 [setup/dsh.md](setup/dsh.md)。
+重启目标 profile，在插件设置里填写 Access Secret（`ZHIHU_ACCESS_TOKEN`），
+再做一次真实查询。不要把密钥写进 profile patch 或聊天。完整步骤见
+[setup/dsh.md](setup/dsh.md)。
 
 ## 4. 直接 CLI 和 OpenWebUI
 

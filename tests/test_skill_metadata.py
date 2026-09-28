@@ -139,18 +139,17 @@ def test_setup_reference_has_safe_codex_mcp_verification() -> None:
     assert "performs one real `hot_list(limit=1)` request" in normalized
 
 
-def test_setup_reference_has_native_dsh_bundle_installation() -> None:
+def test_setup_reference_points_dsh_users_to_dsh_plugins() -> None:
     setup = (SKILL_DIR / "references" / "setup.md").read_text(
         encoding="utf-8"
     )
 
+    assert "dsh plugin --profile web add @klarkxy/dsh-zhihu" in setup
     assert (
-        'dsh plugin --profile web add '
-        '"github:klarkxy/zhihu-search"'
+        "https://github.com/klarkxy/dsh-plugins/tree/main/plugins/dsh-zhihu"
         in setup
     )
-    assert "dsh --profile web --dump-config" in setup
-    assert "@deepseek-ai/dsh-skill-filesystem" in setup
-    assert "zhihu-search-skill" in setup
-    assert "must not start a persistent MCP server" in setup
-    assert "never\nadd an Access Secret" in setup
+    assert "dsh plugin --profile web remove dsh-plugin-zhihu-search" in setup
+    assert 'add "github:klarkxy/zhihu-search"' not in setup
+    assert "ZHIHU_ACCESS_TOKEN" in setup
+    assert "Never add it to a profile" in setup

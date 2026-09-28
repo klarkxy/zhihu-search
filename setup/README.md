@@ -4,7 +4,7 @@
 
 | 优先级 | 方式 | 什么时候用 |
 |---:|---|---|
-| 1 | **Skill** | 默认选择；DSH 通过专用 bundle 安装同一份 Skill |
+| 1 | **Skill** | 默认选择。DSH 改用 [`@klarkxy/dsh-zhihu`](https://github.com/klarkxy/dsh-plugins/tree/main/plugins/dsh-zhihu) |
 | 2 | **MCP** | 同一客户端里需要持续、高频调用 |
 | 3 | CLI | 临时查询、脚本和调试 |
 | 4 | OpenWebUI | 明确需要 HTTP 工具服务器 |
@@ -57,16 +57,17 @@ Skill 默认按需执行一条最窄的 CLI 命令；当前会话已经有匹配
 
 Codex 的加载和验证细节见 [Codex 配置](codex.md)。
 
-### DSH 用户：通过 bundle 安装同一份 Skill
+### DSH 用户：安装独立插件
 
-DeepSeek Harness 不运行通用 `install-skill`，而是使用原生 bundle：
+DeepSeek Harness 使用
+[`@klarkxy/dsh-zhihu`](https://github.com/klarkxy/dsh-plugins/tree/main/plugins/dsh-zhihu)。
+本仓库不再提供 DSH 安装包。
 
 ```bash
-dsh plugin --profile web add "github:klarkxy/zhihu-search"
+dsh plugin --profile web add @klarkxy/dsh-zhihu
 ```
 
-bundle 不保存密钥，也不启动 MCP；查询仍按需执行 `uvx zhihu-search`。完整
-流程见 [DSH 指南](dsh.md)。
+完整的安装和旧插件移除步骤见 [DSH 指南](dsh.md)。
 
 ## 2. MCP（高频集成）
 

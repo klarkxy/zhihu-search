@@ -145,14 +145,15 @@ uvx zhihu-search <command> --help
 
 ### DeepSeek Harness
 
-DSH 用户通过原生 bundle 安装**同一份 Skill**，不需要再注册 MCP：
+DSH 插件已迁到
+[`plugins/dsh-zhihu`](https://github.com/klarkxy/dsh-plugins/tree/main/plugins/dsh-zhihu)，
+本仓库不再维护它：
 
 ```bash
-dsh plugin --profile web add "github:klarkxy/zhihu-search"
+dsh plugin --profile web add @klarkxy/dsh-zhihu
 ```
 
-bundle 不保存知乎凭证，也不会启动常驻 MCP。安装、验证、固定版本和移除步骤
-见 [DSH 指南](setup/dsh.md)。
+安装和从旧安装包切换的步骤见 [DSH 指南](setup/dsh.md)。
 
 ### OpenWebUI
 
