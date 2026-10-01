@@ -1,9 +1,9 @@
 # Setup and diagnostics
 
-Read this reference only when the Skill needs installation, credentials, optional MCP setup, or
-diagnostics. For ordinary research, return to `SKILL.md` and use one matching route.
+Read only for installation, credentials, optional MCP setup, or diagnostics. If the Skill
+is already loaded and a working tool/CLI is available, return to the task; do not reinstall.
 
-## 1. Install the Skill
+## 1. Install the Skill only when requested or absent
 
 For Codex across repositories, use the user-level installation:
 
@@ -14,60 +14,81 @@ uvx zhihu-search install-skill
 ```
 
 Install [uv](https://docs.astral.sh/uv/) if `uvx` is missing, or
-[Node.js](https://nodejs.org/) if `npx` is missing. This delegates installation to `npx skills`
-and targets Codex by default. Add `--project` only
-when the user explicitly wants project-local isolation, or repeat `--agent <name>` for other
-Agents. Start a new Codex task after installation so the Skill catalog reloads.
+[Node.js](https://nodejs.org/) if `npx` is missing **and Skill installation is needed**.
+An installed `zhihu-search` executable can run queries without `uvx` or `npx`.
+Installation delegates to `npx skills` and targets Codex by default. Add `--project` only
+for requested project-local isolation, or repeat `--agent <name>` for other Agents.
+Reload the target client's Skill catalog; for Codex, start a new task after installation.
 
-## 2. Prepare credentials
+## 2. Prepare CLI credentials, not remote MCP credentials
+
+Check only if CLI credential state is unknown or has changed:
 
 ```bash
-uvx --version
-uvx zhihu-search --version
 uvx zhihu-search --check-token
 ```
 
 `--check-token` does not make an upstream request. It must not print a secret fragment or a
-user-specific credentials path. If credentials are missing, direct the user to the Zhihu
-developer console and have them save the Access Secret in their own terminal:
+user-specific credentials path. Reuse a successful check/business call in the same session.
+A remote MCP server may use a different environment; a local check cannot verify it.
+
+If missing, direct the user to the [Zhihu developer console](https://developer.zhihu.com/personal).
+Have them save the Access Secret in their own terminal, not through an agent tool call:
 
 ```bash
 uvx zhihu-search --save-token "<Access Secret>"
+```
+
+Never ask the user to paste an Access Secret, OAuth app key, or OAuth token into chat.
+Do not read or print the credentials file. The CLI reads `ZHIHU_ACCESS_SECRET` before
+its local credentials file; explain precedence without revealing values.
+
+Only when an end-to-end connectivity check is needed:
+
+```bash
 uvx zhihu-search --probe
 ```
 
-`--probe` performs one real `hot_list(limit=1)` request. Use it only for an end-to-end check, not
-as a repeated health poll. Never ask the user to paste an Access Secret, OAuth app key, or OAuth
-token into chat.
+`--probe` performs one real `hot_list(limit=1)` request. It consumes a real request and
+is not a repeated health poll. A successful business query already verifies connectivity.
 
-## 3. Verify the Skill
+## 3. Verify behavior, not just discovery
 
 Use a natural request such as:
 
 > 帮我查一下最近主流 RAG 评测方法在中文开发者社区的讨论，给出来源链接。
 
-The Skill should be discovered, choose exactly one matching core route, and return a useful result
-with source links. Also check the negative boundary with a repository-local code question, a
-translation request, or a pure math problem; those must not invoke external Zhihu capabilities.
+The Skill should start with `search`, inspect the results, and return a grounded answer
+with source links. Targeted follow-up searches are allowed when evidence is insufficient;
+a single successful query is enough only when it covers the request. “整理/分析” should
+not silently delegate the task to `ask`.
+
+Also verify that a repository-local code question, translation, pure math, or a request to
+summarize already-provided text without browsing does not invoke external Zhihu tools.
 
 ## Optional: persistent MCP for high-frequency use
 
-Do not register a global stdio MCP server just to make the Skill available. Skill discovery is
-independent of MCP registration. For occasional requests, keep using the Skill with one on-demand
-CLI command.
+Do not register a global stdio MCP server just to make the Skill available.
+Skill discovery is independent of MCP registration. For occasional requests, use the
+CLI on demand without a long-lived service.
 
-If matching Zhihu MCP tools are already visible, reuse them and do not duplicate the request with
-the CLI. Configure persistent MCP only when the user explicitly asks for high-frequency integration
-and accepts the client process lifecycle. The profiles are `compact`, `knowledge`, `user`,
-`questions`, `creator`, `office`, and `full`; profile names may be mixed with explicit tool names.
+Reuse matching visible MCP tools; do not duplicate successful calls through the CLI.
+Configure persistent MCP only when the user explicitly asks for high-frequency integration
+and accepts the client process lifecycle. Profiles are `compact`, `knowledge`, `user`,
+`questions`, `creator`, `office`, and `full`; names may be mixed with explicit tool names.
 
 ```text
 command: uvx
 args:    zhihu-search serve --tools compact
 ```
 
-A long-lived Codex host may retain one stdio process tree per task context until the host exits.
-Explain that lifecycle before changing an existing MCP registration.
+In compact mode, visible `other(action="enable")` expands low-frequency tools within the
+current session. Refresh/discover tools if the host supports it; do not assume the catalog
+has updated. A strict allowlist cannot be expanded beyond its allowed names. Never bypass
+an explicit access restriction by switching transports or changing registration.
+
+A long-lived Codex host may retain one stdio process tree per task context until the host
+exits. Explain that lifecycle before changing an existing MCP registration.
 
 ## DeepSeek Harness
 
@@ -89,15 +110,13 @@ dsh plugin --profile web remove dsh-plugin-zhihu-search
 Enter the Access Secret in the plugin settings (`ZHIHU_ACCESS_TOKEN`). Never add it to a profile
 patch or to chat.
 
-## Diagnose
+## Diagnose the observed failure only
 
-```bash
-uvx zhihu-search --quota
-uvx zhihu-search --probe
-uvx zhihu-search --help
-codex mcp list
-```
+Use `uvx zhihu-search <command> --help` for argument/version mismatches. Use `quota` or
+`--quota` for official quota questions or a relevant `Code=30002`; it does not consume
+business quota or read a local counter. Do not assume every `30002` is quota exhaustion.
+For `30003` risk-control refusal, stop instead of immediately retrying.
 
-Use `codex mcp list` only to detect an unexpected persistent registration. Ask before removing or
-changing user configuration. `--quota` queries Zhihu's official daily quota and does not consume
-business quota or read a local counter.
+Use `codex mcp list` only to inspect an unexpected persistent registration. Ask before
+removing or changing user configuration. Do not run a blanket sequence of quota, probe,
+installation, and MCP checks before an ordinary research request.

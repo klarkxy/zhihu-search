@@ -1,50 +1,24 @@
 [
-  {
-    "query": "知乎上真实用户怎么评价石头 P20 Pro 扫地机？请给我几条可检查的来源链接。",
-    "should_trigger": true
-  },
-  {
-    "query": "国内开发者对 Cursor 的实际口碑和避坑建议是什么？最好找中文社区的一手经验。",
-    "should_trigger": true
-  },
-  {
-    "query": "最近中文社区都在讨论 AI 眼镜的哪些问题？整理主要观点和争议。",
-    "should_trigger": true
-  },
-  {
-    "query": "帮我核实这条国内热点消息，并找几个中文来源看看大家怎么说。",
-    "should_trigger": true
-  },
-  {
-    "query": "找知乎或其他中文用户关于这款手机续航的长期使用体验，不要只引用厂商参数。",
-    "should_trigger": true
-  },
-  {
-    "query": "zhihu-search 按需 CLI 怎么安装？我不想在 Codex 里常驻 MCP。",
-    "should_trigger": true
-  },
-  {
-    "query": "把这段中文翻译成自然的英文，保留原来的项目符号。",
-    "should_trigger": false
-  },
-  {
-    "query": "解释一下 TCP 为什么需要三次握手，不需要查外部资料。",
-    "should_trigger": false
-  },
-  {
-    "query": "只查这个框架的官方中文文档，确认配置字段含义，不要引用社区观点或用户经验。",
-    "should_trigger": false
-  },
-  {
-    "query": "去 Reddit 看海外用户对这款手机的口碑，中文社区和知乎都不用查。",
-    "should_trigger": false
-  },
-  {
-    "query": "只总结我下面贴出的这篇知乎回答，不要联网，也不要补充其他来源。",
-    "should_trigger": false
-  },
-  {
-    "query": "检查当前仓库的 package.json，为什么 pnpm build 报缺少 vite？",
-    "should_trigger": false
-  }
+  {"query": "知乎上真实用户怎么评价石头 P20 Pro 扫地机？请给我几条可检查的来源链接。", "should_trigger": true},
+  {"query": "国内开发者对 Cursor 的实际口碑和避坑建议是什么？最好找中文社区的一手经验。", "should_trigger": true},
+  {"query": "最近中文社区都在讨论 AI 眼镜的哪些问题？整理主要观点和争议。", "should_trigger": true},
+  {"query": "帮我核实这条国内热点消息，并找几个中文来源看看大家怎么说。", "should_trigger": true},
+  {"query": "找知乎或其他中文用户关于这款手机续航的长期使用体验，不要只引用厂商参数。", "should_trigger": true},
+  {"query": "zhihu-search 按需 CLI 怎么安装？我不想在 Codex 里常驻 MCP。", "should_trigger": true},
+  {"query": "看看这个知乎问题下面的回答有哪些分歧：https://www.zhihu.com/question/123", "should_trigger": true},
+  {"query": "请调用知乎直答的 fast 模型，解释一下 RAG 的基本概念。", "should_trigger": true},
+  {"query": "帮我看看知乎开放平台今天的官方剩余额度，别用本地估算。", "should_trigger": true},
+  {"query": "查一下我自己知乎账号九月份的创作数据，缺失的指标不要当成零。", "should_trigger": true},
+  {"query": "在我的知乎直答私人知识库中找退款规则，不要把问题发给全网搜索。", "should_trigger": true},
+  {"query": "用 zhihu-search 把我指定的本地 report.pdf 上传并创建 PDF 解析任务。", "should_trigger": true},
+  {"query": "用知乎这篇专栏生成 12 页 PPT：https://zhuanlan.zhihu.com/p/123", "should_trigger": true},
+  {"query": "指导我在本机为 zhihu-search 配置 OAuth，不要在聊天中接收任何密钥。", "should_trigger": true},
+  {"query": "把这段中文翻译成自然的英文，保留原来的项目符号。", "should_trigger": false},
+  {"query": "解释一下 TCP 为什么需要三次握手，不需要查外部资料。", "should_trigger": false},
+  {"query": "只查这个框架的官方中文文档，确认配置字段含义，不要引用社区观点或用户经验。", "should_trigger": false},
+  {"query": "去 Reddit 看海外用户对这款手机的口碑，中文社区和知乎都不用查。", "should_trigger": false},
+  {"query": "只总结我下面贴出的这篇知乎回答，不要联网，也不要补充其他来源。", "should_trigger": false},
+  {"query": "检查当前仓库的 package.json，为什么 pnpm build 报缺少 vite？", "should_trigger": false},
+  {"query": "请只根据我上传的 Excel 计算这一列的平均值，不需要任何社区意见。", "should_trigger": false},
+  {"query": "纯数学证明：说明为什么任意大于一的整数都能分解为素数乘积。", "should_trigger": false}
 ]
