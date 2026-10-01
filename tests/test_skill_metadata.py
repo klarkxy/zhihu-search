@@ -15,7 +15,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SKILL_DIR = ROOT / "skills" / "zhihu-search"
 SKILL_MD = SKILL_DIR / "SKILL.md"
 TRIGGER_EVALS = ROOT / "evals" / "trigger-evals.json"
-WORKFLOW_EVALS = ROOT / "evals" / "workflow-evals.json"
 
 
 def _frontmatter(path: Path) -> dict[str, object]:
@@ -61,7 +60,7 @@ def test_skill_is_self_contained_after_install_copy(tmp_path: Path) -> None:
     installed = tmp_path / "zhihu-search"
     shutil.copytree(SKILL_DIR, installed)
     _assert_local_links_resolve(installed)
-    for name in ("setup.md", "workflows.md"):
+    for name in ("setup.md", "tools.md"):
         assert (installed / "references" / name).is_file()
         assert f"(references/{name})" in (installed / "SKILL.md").read_text(encoding="utf-8")
 
@@ -70,7 +69,7 @@ def test_main_skill_keeps_specialized_detail_in_references() -> None:
     text = SKILL_MD.read_text(encoding="utf-8")
     assert len(text.splitlines()) < 180
     assert "## Official quota" not in text
-    workflows = (SKILL_DIR / "references" / "workflows.md").read_text(encoding="utf-8")
+    tools = (SKILL_DIR / "references" / "tools.md").read_text(encoding="utf-8")
     for command in (
         "quota", "user-contents", "user-followees", "user-collections", "user-favlists",
         "favlist-contents", "question-recommendations", "question-answers",
@@ -79,7 +78,7 @@ def test_main_skill_keeps_specialized_detail_in_references() -> None:
         "knowledge-upload", "pdf-upload", "pdf-create", "pdf-status", "ppt-create",
         "ppt-status", "oauth-url", "oauth-token",
     ):
-        assert f"uvx zhihu-search {command} " in workflows or f"uvx zhihu-search {command}\n" in workflows
+        assert f"uvx zhihu-search {command} " in tools or f"uvx zhihu-search {command}\n" in tools
 
 
 def test_distributed_instructions_do_not_reintroduce_single_query_cap() -> None:
@@ -105,31 +104,6 @@ def test_trigger_eval_set_covers_positive_and_near_miss_cases() -> None:
     negative_queries = "\n".join(item["query"] for item in evals if not item["should_trigger"])
     for near_miss in ("官方中文文档", "Reddit", "贴出的这篇知乎回答"):
         assert near_miss in negative_queries
-
-
-def test_workflow_evals_have_actionable_rubrics() -> None:
-    evals = json.loads(WORKFLOW_EVALS.read_text(encoding="utf-8"))
-    ids = [item["id"] for item in evals]
-    assert len(ids) == len(set(ids))
-    expected_keys = {"id", "query", "context", "expected_first_action", "must", "must_not"}
-    actions = {
-        "search", "answer", "trending", "ask", "question_answers", "other_enable",
-        "quota", "explain_limitation", "setup_guidance",
-    }
-    for item in evals:
-        assert set(item) == expected_keys
-        for key in ("id", "query", "context", "expected_first_action"):
-            assert isinstance(item[key], str) and item[key].strip()
-        assert item["expected_first_action"] in actions
-        for key in ("must", "must_not"):
-            assert isinstance(item[key], list) and item[key]
-            assert all(isinstance(rule, str) and rule.strip() for rule in item[key])
-    assert {
-        "analysis-needs-sources", "sufficient-first-result", "comparison-gap", "topic-recency",
-        "question-url", "third-party-article", "hidden-knowledge-tool", "permission-denied",
-        "missing-cli-credentials", "official-quota", "unknown-upload-outcome", "pending-ppt",
-        "untrusted-result", "failed-json-is-not-empty", "explicit-zhida", "hot-list",
-    } <= set(ids)
 
 
 def test_shell_examples_are_well_formed_and_never_start_a_bare_server() -> None:
@@ -170,7 +144,7 @@ def test_openai_interface_matches_skill_behavior() -> None:
     assert metadata["interface"]["display_name"] == "Zhihu Search"
     assert 25 <= len(metadata["interface"]["short_description"]) <= 64
     prompt = metadata["interface"]["default_prompt"]
-    for cue in ("$zhihu-search", "matching visible Zhihu MCP tool", "CLI on demand", "source links"):
+    for cue in ("$zhihu-search", "matching visible Zhihu MCP tool", "CLI on demand"):
         assert cue in prompt
     assert metadata["policy"]["allow_implicit_invocation"] is True
 
@@ -180,7 +154,7 @@ def test_setup_reference_has_safe_codex_mcp_verification() -> None:
     normalized = " ".join(setup.split())
     for cue in (
         "Do not register a global stdio MCP server", "Skill discovery is independent of MCP registration",
-        "Targeted follow-up searches are allowed", "persistent MCP only when the user explicitly asks",
+        "persistent MCP only when the user explicitly asks",
         "must not print a secret fragment", "performs one real `hot_list(limit=1)` request",
     ):
         assert cue in normalized

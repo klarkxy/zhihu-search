@@ -1,7 +1,7 @@
 interface:
   display_name: "Zhihu Search"
-  short_description: "检索知乎与中文社区证据，按需补查并附来源，支持账号与知识库任务"
-  default_prompt: "Use $zhihu-search to gather evidence for this request. Reuse a matching visible Zhihu MCP tool or run the CLI on demand. Start with a focused search, inspect the results, follow up on material gaps, and answer with source links. Use ask only for an explicitly requested Zhida-generated answer; preserve source and account boundaries."
+  short_description: "知乎开放平台工具：搜索、直答、热榜、问题、账号、知识库与 PDF/PPT"
+  default_prompt: "Use $zhihu-search for this request. Its tools are available as a matching visible Zhihu MCP tool or through the CLI on demand; see the Skill for each tool's parameters and limits."
 
 policy:
   allow_implicit_invocation: true

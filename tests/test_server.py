@@ -126,10 +126,12 @@ async def test_core_tool_metadata_and_schemas_are_stable() -> None:
     }
 
     assert server.mcp.instructions == server.MCP_INSTRUCTIONS
-    assert "merely because a question is in Chinese" in server.MCP_INSTRUCTIONS
-    assert "repository-local code questions" in server.MCP_INSTRUCTIONS
-    # The server must not push the model to call tools regardless of need.
-    pushy = ("proactively", "even when the user does not", "主动使用", "必须调用", "不要跳过")
+    assert "other(action='enable')" in server.MCP_INSTRUCTIONS
+    # Tool text describes capabilities only; it must not steer when or how to call tools.
+    pushy = (
+        "proactively", "even when the user does not", "主动使用", "必须调用", "不要跳过",
+        "Use these tools when", "Do not use them", "时使用", "优先于", "改用",
+    )
     for text in (
         server.MCP_INSTRUCTIONS,
         server.SEARCH_TOOL_DESCRIPTION,
@@ -137,7 +139,7 @@ async def test_core_tool_metadata_and_schemas_are_stable() -> None:
         server.TRENDING_TOOL_DESCRIPTION,
     ):
         assert not any(phrase in text for phrase in pushy)
-    assert "Zhida-generated answer is requested" in server.MCP_INSTRUCTIONS
+    assert "Zhida AI-generated" in server.MCP_INSTRUCTIONS
     assert "count 1-10" in server.SEARCH_TOOL_DESCRIPTION
 
     for name, (title, description) in expected.items():

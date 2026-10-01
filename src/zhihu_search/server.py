@@ -33,18 +33,12 @@ from .upstream.http_client import ZhihuRestClient
 
 
 MCP_INSTRUCTIONS = (
-    "Use these tools when the answer needs Zhihu or Chinese-community evidence: "
-    "requested Zhihu search, real experiences, reviews, community opinions, comparisons, "
-    "Chinese sources, or current Zhihu hot topics. Do not use them merely because a "
-    "question is in Chinese. Use search when inspectable sources or links are expected; "
-    "use ask only when a Zhida-generated answer is requested, and present it as another "
-    "AI's synthesis rather than an original community post. Use trending for current "
-    "Zhihu hot topics. Search first, answer from the evidence, and add a targeted "
-    "follow-up only for a material gap. Do not call external Zhihu tools for "
-    "repository-local code questions, pure math or logic, translation, or operations "
-    "limited to user-provided content unless external verification is requested. "
-    "需要知乎或中文社区证据（真实经验、口碑、社区观点、对比、中文来源、知乎热点）时使用；"
-    "不要仅因为问题是中文就调用。"
+    "Zhihu Open Platform tools: search (Zhihu site or web), ask (Zhida AI-generated "
+    "answers), and trending (current Zhihu hot list). Low-frequency tools for authorized "
+    "user data, questions, creator statistics, knowledge bases, and PDF/PPT tasks are "
+    "listed after other(action='enable'). "
+    "知乎开放平台工具：search 搜索知乎站内或全网，ask 调用知乎直答生成回答，trending 获取知乎热榜；"
+    "用户数据、问题、创作统计、知识库与 PDF/PPT 等低频工具通过 other(action='enable') 展开。"
 )
 
 CORE_READ_ONLY_ANNOTATIONS = ToolAnnotations(
@@ -54,22 +48,19 @@ CORE_READ_ONLY_ANNOTATIONS = ToolAnnotations(
 )
 
 SEARCH_TOOL_DESCRIPTION = (
-    "需要知乎或中文社区证据时使用：真实经验、口碑、社区观点、对比、教程或可检查的中文来源。"
-    "需要标题、链接或证据时优先于 ask。scope='zhihu' 走知乎站内搜索（count 1-10）；"
+    "搜索知乎站内或全网内容。scope='zhihu' 走知乎站内搜索（count 1-10）；"
     "scope='web' 走全网搜索（count 1-20），可选 filter 表达式，但 filter 不能限定 zhihu.com。"
     "返回标题、链接、作者、赞同数和摘要等结构化结果。"
 )
 
 ASK_TOOL_DESCRIPTION = (
-    "用户明确要知乎直答生成的回答时使用。结果是另一个 AI 的综合，不是原始社区帖子；"
-    "需要来源、链接或结果列表时改用 search。model='fast' 适合日常回答；"
-    "'thinking' 适合复杂分析；'agent' 较慢且会搜索或调用工具，仅在用户接受较长等待时使用。"
+    "调用知乎直答生成回答。结果由 AI 综合生成，不是原始社区帖子。"
+    "model='fast' 响应最快；'thinking' 推理更深；'agent' 会自行搜索或调用工具，耗时较长。"
     "模型可用性取决于账号授权。"
 )
 
 TRENDING_TOOL_DESCRIPTION = (
-    "用户询问知乎热榜、国内当前热点或近期热门讨论时使用。"
-    "返回当前知乎热榜的标题、链接、缩略图与摘要列表（limit 最大 30）。"
+    "获取当前知乎热榜，返回标题、链接、缩略图与摘要列表（limit 最大 30）。"
 )
 
 
@@ -546,8 +537,8 @@ async def user_favlists(
 @mcp.tool(
     name="favlist_contents",
     description=(
-        "获取指定收藏夹的公开内容。favlist_url_token 与 favlist_id 必须二选一，"
-        "优先使用 user_favlists 返回的 UrlToken。"
+        "获取指定收藏夹的公开内容。favlist_url_token 与 favlist_id 必须二选一；"
+        "user_favlists 返回的 UrlToken 可直接作为 favlist_url_token。"
     ),
 )
 async def favlist_contents(
@@ -598,7 +589,7 @@ async def favlist_contents(
     description=(
         "推荐适合当前账号回答的知乎问题。省略 query 时按画像推荐，并不会把空字符串"
         "发给上游；传入主题时按主题推荐。不支持翻页，返回条数可以少于 count。"
-        "与 question_answers 共用 question_discovery 额度。不接受 OAuth 身份切换。"
+        "使用 creator 额度。不接受 OAuth 身份切换。"
     ),
 )
 async def question_recommendations(
@@ -633,8 +624,8 @@ async def question_recommendations(
     name="question_answers",
     description=(
         "获取一个知乎问题下的回答摘要。Summary 不是回答全文，也不是 AI 摘要。"
-        "IsEnd=false 时把 NextOffset 原样作为下一次 offset；缺少 NextOffset 时停止翻页。"
-        "不要按本页条数计算偏移。与 question_recommendations 共用 question_discovery 额度。"
+        "IsEnd=false 时 NextOffset 即下一页 offset；缺少 NextOffset 表示没有下一页。"
+        "偏移不等于已返回条数。使用 question_answers 额度。"
     ),
 )
 async def question_answers(
@@ -694,8 +685,8 @@ async def user_content_detail(
     name="user_content_comments",
     description=(
         "分页读取当前账号已发布创作下的根评论及附带子评论。子评论不保证完整。"
-        "order 为 score、reverse 或 ascending。IsEnd=false 时使用 NextOffset；"
-        "缺少或不递增的 NextOffset 应停止翻页。不要因短页或空页停止。"
+        "order 为 score、reverse 或 ascending。IsEnd=false 时 NextOffset 即下一页 offset；"
+        "缺少或不递增的 NextOffset 表示没有下一页，短页或空页不代表结束。"
         "不接受 OAuth 身份切换。与 creator 额度共用。"
     ),
 )
@@ -736,7 +727,7 @@ async def user_content_comments(
         "读取当前账号的创作指标、创作数量、粉丝概览和可用受众画像。"
         "content_type 为 all、answer、article、pin 或 zvideo。"
         "start_date 与 end_date 必须同时提供或同时省略，格式 YYYY-MM-DD。"
-        "未返回的指标不要补零，比例不要换算成百分比。不接受 OAuth 身份切换。"
+        "未返回的指标表示上游未提供，不等于 0；比例字段为原始小数。不接受 OAuth 身份切换。"
     ),
 )
 async def creator_account_stats(
@@ -773,7 +764,7 @@ async def creator_account_stats(
     description=(
         "读取当前账号单篇已发布创作的阅读、互动、转粉和可用受众画像。"
         "空 Items 不等于各项指标为零。日期规则与账号统计相同。"
-        "未返回的指标不要补零。不接受 OAuth 身份切换。"
+        "未返回的指标表示上游未提供，不等于 0。不接受 OAuth 身份切换。"
     ),
 )
 async def creator_content_stats(
@@ -829,7 +820,7 @@ async def knowledge_bases(
     name="knowledge_items",
     description=(
         "分页获取指定知识库中的内容。cursor 可直接传上一页 NextCursor；"
-        "请以 HasMore 判断是否继续翻页。"
+        "HasMore 表示是否还有下一页。"
     ),
 )
 async def knowledge_items(
@@ -896,8 +887,8 @@ async def knowledge_search(
 @mcp.tool(
     name="pdf_create",
     description=(
-        "使用已上传的 file_id 创建 PDF 解析任务。文件上传需先在运行服务的"
-        "机器上执行 zhihu-search pdf-upload，避免远程工具读取任意本地文件。"
+        "使用已上传的 file_id 创建 PDF 解析任务。上传只能在运行服务的机器上"
+        "通过 CLI zhihu-search pdf-upload 完成；MCP 工具不读取本地文件。"
     ),
 )
 async def pdf_create(
