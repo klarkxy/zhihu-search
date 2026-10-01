@@ -16,7 +16,7 @@ Read [specialized workflows](references/workflows.md) only for the relevant capa
 | User needs | Start with | Important distinction |
 |---|---|---|
 | Community experiences, comparisons, explanations grounded in posts, or inspectable sources | `search` | Default to `--scope zhihu`; use `--scope web` only when wider sources are in scope. “解释/分析/总结” does not by itself mean `ask`. |
-| A Zhihu Zhida-generated answer, explicitly requested | `ask --model fast` | `ask` calls another AI; its synthesis is not an original community post. Use `thinking` for requested deeper analysis; `agent` only with acceptance of the slower request. |
+| A Zhihu Zhida-generated answer, explicitly requested | `ask --model fast` | `ask` calls another AI; its synthesis is not an original community post. Use `thinking` for requested deeper analysis; `agent` only with acceptance of the slower request. Model availability depends on the account's authorization. |
 | The current Zhihu hot list | `trending` | A topic-specific “最近大家怎么看 X” needs `search`, not an unrelated site-wide hot list. |
 | Answers under a supplied Zhihu question URL | `question-answers` | Returns answer excerpts, not full answers. See the link boundary below. |
 | Quota, own content/comments/statistics, collections, knowledge, PDF/PPT, or OAuth | Relevant workflow in the reference | Do not substitute public `search` or `ask` for account or private-document operations. |
@@ -32,7 +32,8 @@ into one route or outsource your own synthesis to `ask`.
 Do not check local CLI credentials before a remote MCP call, and do not duplicate a
 successful MCP request with the CLI.
 
-For a missing specialized tool in compact mode, call the visible `other(action="enable")`
+Server tool profiles are `compact`, `knowledge`, `user`, `questions`, `creator`, `office`
+(PDF/PPT), and `full`. For a missing specialized tool in compact mode, call the visible `other(action="enable")`
 once, then refresh/discover the catalog if the host supports it. Call the newly visible tool;
 if it remains unavailable, use the CLI when permitted. Do not invent tool names, loop on
 `other`, or change persistent registration. Never bypass an explicit permission denial or
@@ -57,8 +58,8 @@ Never invoke bare `uvx zhihu-search`: it starts the persistent stdio MCP server.
 
 ## 3. Search, inspect, and fill specific gaps
 
-Start with the subject and one discriminating aspect, not the entire user prompt. Search
-queries must be 2–100 characters. Preserve relevant model/version names and time windows.
+Start with the subject and one discriminating aspect, not the entire user prompt. The client
+accepts search queries of 2–100 characters. Preserve relevant model/version names and time windows.
 
 ```bash
 uvx zhihu-search search "扫地机器人 长期使用 维护成本" --scope zhihu --count 5
@@ -79,8 +80,10 @@ the user-set budget is reached, or access/quota prevents progress. Report remain
 
 `--count` has a maximum of 10 for Zhihu and 20 for web; `trending --limit` has a maximum
 of 30. `--filter` and `--search-db` apply only to web search; keep `--search-db all` unless
-the user requests another index. A year in the query is not a verified publication-date
-filter. Search has no pagination parameter: do not invent `--page`, `--offset`, or a cursor
+the user requests another index. Web filters support `host == "example.com"`, `!=`,
+second-level `publish_time` comparisons, and uppercase `AND`/`OR`; they cannot target
+zhihu.com, so use `--scope zhihu` for Zhihu-only results. A year in the query is not a
+verified publication-date filter. Search has no pagination parameter: do not invent `--page`, `--offset`, or a cursor
 for it, even if a web response reports `HasMore`.
 
 For structured inspection, append `--format json` to a business command **before** running
@@ -120,7 +123,8 @@ is pending. Never invent links, metrics, quotations, quota reset times, or unrea
 | No results or weak relevance | Refine the query once where useful; report the gap rather than filling it from memory. |
 | Invalid arguments or unknown command | Check `uvx zhihu-search <command> --help`; fix the arguments, not the user's configuration. |
 | Missing/invalid credentials | Follow setup; never read credentials files into tool output or chat. |
-| `Code=30002` | Query official `quota` once if useful, then report the returned quota/permission situation; do not assume a reset time. |
+| `Code=30001` | Rate, concurrency, or daily-quota limit (meaning varies by endpoint). Do not retry in a loop; wait or report it. |
+| `Code=30002` | Quota exhausted for that capability. Query official `quota` once if useful and report it; free quota resets at 00:00 Beijing time. |
 | `Code=30003` or an explicit access denial | Stop; do not immediately retry or switch identities/transports to evade the restriction. |
 | Network/server failure | A bounded retry of a read-only call may be appropriate; report failure if it persists. Never blindly repeat uploads or task creation. |
 

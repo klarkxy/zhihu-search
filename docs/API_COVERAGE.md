@@ -77,7 +77,7 @@ MCP 是 Skill 之后的高频集成选项。默认使用 `compact`，避免把�
 
 `other` 是会话级管理工具：
 
-- `enable` 展开 `quota`、5 个用户公开数据工具、`question_recommendations`、
+- `enable` 展开 `quota`、5 个本人公开数据工具、`question_recommendations`、
   `question_answers`、`user_content_detail`、`user_content_comments`、
   `creator_account_stats`、`creator_content_stats`、`knowledge_bases`、
   `knowledge_items`、`knowledge_search`、`pdf_create`、`pdf_status`、

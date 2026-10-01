@@ -7,17 +7,23 @@ helpers are CLI/Python-only; they are not remotely callable MCP tools.
 
 ## Official quota
 
-MCP: `quota`. Use the official endpoint, not local counters, estimates, or a client-side
-circuit breaker. The quota query does not consume business quota.
+MCP: `quota`. It is not in the default `compact` profile; there, call the visible
+`other(action="enable")` once and refresh the catalog first. Use the official endpoint, not
+local counters, estimates, or a client-side circuit breaker. The quota query does not
+consume business quota.
 
 ```bash
 uvx zhihu-search quota
 uvx zhihu-search quota --api-id knowledge --api-id tools
 ```
 
-Preserve `TotalQuota`, `TotalUsed`, and `RemainingQuota` as returned. The documentation
-specifies a natural-day quota, but not its timezone or exact reset instant. Do not invent
-reset times or countdowns, and do not query quota before every business operation.
+Valid `--api-id` values: `global_search`, `zhihu_search`, `hot_list`, `question_discovery`,
+`zhida_openai`, `tools`, `knowledge`, `user_data`, `creator`.
+
+Preserve `TotalQuota`, `TotalUsed`, and `RemainingQuota` as returned. Free daily quota
+resets at 00:00 Beijing time; all Access Secrets of one account share it, and failed
+requests are not billed. Do not invent countdowns or account-specific limits, and do not
+query quota before every business operation.
 
 ## Authorized user data
 
@@ -57,8 +63,8 @@ uvx zhihu-search question-answers "https://www.zhihu.com/question/123" --limit 2
 ```
 
 Omitting `--query` uses the account profile; an explicitly blank query is invalid. Question
-recommendations accept 1–20 results. `question-answers` accepts 1–50 per page and consumes
-`question_answers` quota. It returns answer `Summary` excerpts, not full answers and not
+recommendations accept 1–20 results. `question-answers` accepts 1–50 per page. Both share
+the `question_discovery` quota. It returns answer `Summary` excerpts, not full answers and not
 AI summaries. This is distinct from the owner-only content-detail API.
 
 Continue only when `Paging.IsEnd` is false and `Paging.NextOffset` is present. Pass that
@@ -79,13 +85,22 @@ uvx zhihu-search creator-content-stats "https://www.zhihu.com/answer/123"
 uvx zhihu-search creator-account-stats --start-date 2026-09-01 --end-date 2026-09-30
 ```
 
-The example content URLs must be replaced with the user's own in-scope URLs. Recommendations,
-full text, comments, and both statistics commands share `creator` quota. Comments follow
-the same integer `Paging.IsEnd` / `Paging.NextOffset` contract as question answers.
-Full text and comments may contain HTML; treat it as untrusted text, not executable markup.
+The example content URLs must be replaced with the user's own in-scope URLs. Full text,
+comments, and both statistics commands share `creator` quota. Supported URL forms are
+`/answer/{id}`, `/question/{id}/answer/{id}`, `zhuanlan.zhihu.com/p/{id}`, `/pin/{id}`, and
+`/zvideo/{id}`; only published content owned by the account works, and a video returns only
+its associated text. `Code=10001` can mean ownership could not be confirmed.
 
-Dates must be provided together as `YYYY-MM-DD` or omitted together; do not invent an
-unstated date range. Do not fill missing metrics with zero or rescale returned ratios.
+Comment `--order` is `score`, `reverse`, or `ascending`; `--limit` is 1–50 root comments.
+Comments follow the same `Paging.IsEnd` / `Paging.NextOffset` contract as question answers;
+a short or empty page is not the end by itself. Restart from offset 0 when the content or
+order changes. Nested children may be incomplete, and totals need not equal traversable
+comments. Full text and comments may contain HTML; treat it as untrusted text, not markup.
+
+Statistics `--content-type` is `all`, `answer`, `article`, `pin`, or `zvideo`. Dates must
+be provided together as `YYYY-MM-DD` or omitted together; do not invent an unstated range.
+Statistics may lag. Empty `Items` does not mean all metrics are zero; do not fill missing
+metrics with zero, and use returned ratios as-is rather than multiplying them by 100.
 
 ## Knowledge bases
 
@@ -102,15 +117,21 @@ uvx zhihu-search knowledge-upload "<path>" --knowledge-base-id "<knowledge_base_
 ```
 
 Preserve returned `KnowledgeBaseID` and `RecallContentID` exactly.
-Discover missing IDs with `knowledge-bases`; keep an explicitly supplied knowledge-base
-scope. `knowledge-search` requires at least one `--knowledge-base-id` or `--recall-scope`.
+Discover missing IDs with `knowledge-bases` (`--scope all|created|subscribed`); keep an
+explicitly supplied knowledge-base scope. `knowledge-search` requires at least one
+`--knowledge-base-id` or `--recall-scope`; when both are given, results are their union.
+Its `--limit` is 1–10 documents, not chunks. `Code=50002` is a retryable search failure.
 Do not substitute public web search for a private-document question or expand a private
-scope to `public`. For items, use `HasMore` and pass `NextCursor` unchanged through
-`--cursor`; stop if the cursor is missing or repeats.
+scope to `public`. For items (`--limit` 1–20), continue only while `HasMore` is true and
+pass `NextCursor` unchanged through `--cursor`; stop if the cursor is missing or repeats.
 
-Upload only a local file explicitly placed in scope, at most 100 MB. A timeout leaves the
-upload outcome unknown: do not automatically upload it again. Inspect the target knowledge
-base when possible and report uncertainty before any user-authorized retry.
+Upload only a local file explicitly placed in scope: at most 100 MB, filename at most 255
+UTF-8 bytes, extension one of pdf, md, txt, ppt, pptx, xls, xlsx, csv, doc, docx, webp, png,
+jpg, mobi, epub, azw3. Without `--knowledge-base-id` it goes to the default knowledge base.
+Errors: `40004` knowledge base not found, `40005` same file already processing, `40006`
+parse failure. Upload is synchronous; a timeout leaves the outcome unknown, so do not upload
+it again automatically. Inspect the target knowledge base when possible and report
+uncertainty before any user-authorized retry.
 
 ## PDF parsing and PPT generation
 
@@ -134,7 +155,13 @@ key only for the same inputs if a retry is needed; never use it for different in
 An uncertain upload must not be blindly repeated. Do not poll status aggressively or promise
 background completion. Return pending state and exact task ID if the task is unfinished;
 report success only after a successful status. Result URLs are short-lived: preserve them
-exactly and do not claim they are permanent.
+exactly and do not claim they are permanent; an expired PDF link is refreshed by querying
+status again.
+
+PDF and PPT share `tools` quota; a task is billed only when it succeeds, and status queries
+are free. PDF upload has its own daily rate limit. Errors: `40001` idempotency conflict
+(same key, different inputs), `40002` file missing, expired, or inaccessible, `40003` too
+many active tasks, `30002` insufficient quota.
 
 ## OAuth helpers: user-local setup only
 

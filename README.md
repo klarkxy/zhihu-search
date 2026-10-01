@@ -1,13 +1,14 @@
 # zhihu-search
 
 让 Agent 按需查找知乎与中文社区信息，也可以直接调用知乎开放平台的搜索、
-直答、热榜、额度、用户公开数据、问题发现、创作能力、知识库、PDF、PPT 和
+直答、热榜、额度、本人公开数据、问题发现、创作能力、知识库、PDF、PPT 和
 OAuth 辅助能力。
 
 ## 从 Skill 开始
 
 对大多数人来说，**安装 Skill 就够了**。它会在需要中文社区观点、真实体验、
-口碑、避坑信息或国内热点时主动选择合适的查询方式；平时不会启动常驻服务。
+口碑、避坑信息或国内热点时选择合适的查询方式，不会仅因为问题是中文就触发；
+平时不会启动常驻服务。
 
 ### 1. 安装 Skill
 
@@ -29,11 +30,12 @@ Secret，然后只在自己的终端执行：
 
 ```bash
 uvx zhihu-search --save-token "<你的 Access Secret>"
-uvx zhihu-search --probe
+uvx zhihu-search --check-token
 ```
 
-不要把 Access Secret 发到聊天、截图或仓库。`--probe` 会真实请求一次知乎
-热榜，因此会消耗一次请求额度。
+不要把 Access Secret 发到聊天、截图或仓库。`--check-token` 不发请求；想确认
+端到端连通时，可以选做一次 `uvx zhihu-search --probe`，它会真实请求一次知乎
+热榜并消耗一次 `hot_list` 额度，不要循环执行。
 
 ### 3. 直接告诉 Agent 你想查什么
 
@@ -41,8 +43,9 @@ uvx zhihu-search --probe
 
 > 帮我查一下最近主流的 RAG 评测方法在中文开发者社区的讨论，返回 3 条并附来源链接。
 
-Skill 会按任务选择搜索、直答或热榜。默认按需执行一条最窄的 CLI 命令；如果
-当前客户端已经提供匹配的 `zhihu` MCP 工具，它会直接复用，不会重复查询。
+Skill 会按所需证据选择搜索、直答或热榜：先查一次，证据够就直接回答，只有
+关键缺口时才定向补查。如果当前客户端已经提供匹配的 `zhihu` MCP 工具，它会
+直接复用，不会再走 CLI 重复查询。
 
 需要安装到其他 Agent，或只安装到当前项目时：
 
@@ -175,7 +178,7 @@ uvx zhihu-search openwebui \
 | 搜索、直答、热榜 | 4 | 知乎搜索、全网搜索、直答、热榜 |
 | 问题发现 | 2 | 适合回答的问题，以及问题下的回答摘要 |
 | 官方额度 | 1 | 总额度、已用额度和剩余额度 |
-| 用户公开数据 | 5 | 创作、关注、近期收藏和收藏夹 |
+| 本人公开数据 | 5 | 创作、关注、近期收藏和收藏夹 |
 | 创作能力 | 4 | 本人全文、评论、账号统计和单篇统计 |
 | 知识库 | 4 | 列表、内容、上传、检索 |
 | PDF 解析 | 3 | 上传、创建任务、查询状态 |
@@ -196,7 +199,7 @@ Access Secret 的读取顺序是：
 
 ```bash
 uvx zhihu-search --check-token
-uvx zhihu-search --probe
+uvx zhihu-search --probe        # 可选，消耗一次 hot_list 额度
 uvx zhihu-search --quota
 uvx zhihu-search --clear-token
 ```

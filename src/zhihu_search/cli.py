@@ -15,7 +15,7 @@ Commands (默认: serve):
     ask <query>        向知乎直答提问
     trending           查看知乎热榜
     quota              查询官方每日额度
-    user-*             查询用户公开内容、关注与收藏
+    user-*             查询本人（或 OAuth 授权用户）的公开内容、关注与收藏
     question-*         推荐问题或读取问题回答摘要
     user-content-*     读取本人创作全文与评论
     creator-*          查询本人账号或单篇创作数据
@@ -207,7 +207,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     # --- 知乎用户数据 ---
-    ucp = sub.add_parser("user-contents", help="获取用户公开创作内容。")
+    ucp = sub.add_parser("user-contents", help="获取本人（或 OAuth 授权用户）的公开创作内容。")
     ucp.add_argument(
         "--content-type",
         choices=["all", "answer", "article", "zvideo", "pin", "question"],
@@ -239,7 +239,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="输出格式。",
     )
 
-    ufp = sub.add_parser("user-followees", help="获取用户公开关注列表。")
+    ufp = sub.add_parser("user-followees", help="获取本人（或 OAuth 授权用户）的公开关注列表。")
     ufp.add_argument(
         "--offset", default="0",
         help="分页偏移；可直接使用返回的 Paging.NextOffset。",

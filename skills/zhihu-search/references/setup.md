@@ -49,8 +49,9 @@ Only when an end-to-end connectivity check is needed:
 uvx zhihu-search --probe
 ```
 
-`--probe` performs one real `hot_list(limit=1)` request. It consumes a real request and
-is not a repeated health poll. A successful business query already verifies connectivity.
+`--probe` is optional. It performs one real `hot_list(limit=1)` request, consumes one
+`hot_list` call, and is neither routine preflight nor a repeated health poll. Skip it when a
+business query has already succeeded, because that already verifies connectivity.
 
 ## 3. Verify behavior, not just discovery
 

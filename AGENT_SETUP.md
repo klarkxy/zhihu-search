@@ -40,12 +40,13 @@ uvx zhihu-search --check-token
 
 ```bash
 uvx zhihu-search --save-token "<Access Secret>"
-uvx zhihu-search --probe
+uvx zhihu-search --check-token
 ```
 
 `--check-token` 不发起上游请求，只显示配置状态和来源，不输出 Secret 片段或
-用户凭证路径。`--probe` 会真实调用一次 `hot_list(limit=1)` 并消耗一次请求
-额度；用它判断端到端连通性，不要循环探测。
+用户凭证路径。`--probe` 是可选项：它会真实调用一次 `hot_list(limit=1)` 并消耗
+一次 `hot_list` 额度，只在需要确认端到端连通且还没有成功业务调用时执行一次，
+不要作为每次查询前的预检，也不要循环探测。
 
 默认进行用户级 Skill 安装：
 

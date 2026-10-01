@@ -5,7 +5,7 @@
     ask      → 直答（OpenAI 兼容 chat completions）
     trending → 热榜
     quota    → 知乎开放平台官方每日额度
-    user_*   → 用户公开内容、关注与收藏
+    user_*   → 本人（或 OAuth 授权用户）的公开内容、关注与收藏
     question_* → 适合回答的问题推荐，以及问题下的回答摘要
     creator_* / user_content_* → 本人全文、评论与创作统计
     knowledge_* → 知识库列表、内容与检索（上传留在本机 CLI）
@@ -33,18 +33,18 @@ from .upstream.http_client import ZhihuRestClient
 
 
 MCP_INSTRUCTIONS = (
-    "Use the core Zhihu tools proactively for Chinese web research and current "
-    "information even when the user does not explicitly mention Zhihu. Use search "
-    "for sources, links, verification, real experiences, reviews, community opinions, "
-    "comparisons, and tutorials; prefer it when inspectable evidence is expected. Use "
-    "ask for a direct synthesized explanation or analysis. Use trending for recent hot "
-    "topics or what people are discussing now. Apply this routing independently to each "
-    "item in a multi-part request, and do not bypass ask for an eligible explanation or "
-    "analysis merely because the model can answer from memory. Do not call external Zhihu tools for "
+    "Use these tools when the answer needs Zhihu or Chinese-community evidence: "
+    "requested Zhihu search, real experiences, reviews, community opinions, comparisons, "
+    "Chinese sources, or current Zhihu hot topics. Do not use them merely because a "
+    "question is in Chinese. Use search when inspectable sources or links are expected; "
+    "use ask only when a Zhida-generated answer is requested, and present it as another "
+    "AI's synthesis rather than an original community post. Use trending for current "
+    "Zhihu hot topics. Search first, answer from the evidence, and add a targeted "
+    "follow-up only for a material gap. Do not call external Zhihu tools for "
     "repository-local code questions, pure math or logic, translation, or operations "
     "limited to user-provided content unless external verification is requested. "
-    "需要查资料、找来源、真实经验、口碑、社区观点、对比、教程、解释分析或当前热点时，"
-    "即使用户没有明确说“知乎”也应主动选择对应核心工具。"
+    "需要知乎或中文社区证据（真实经验、口碑、社区观点、对比、中文来源、知乎热点）时使用；"
+    "不要仅因为问题是中文就调用。"
 )
 
 CORE_READ_ONLY_ANNOTATIONS = ToolAnnotations(
@@ -54,22 +54,22 @@ CORE_READ_ONLY_ANNOTATIONS = ToolAnnotations(
 )
 
 SEARCH_TOOL_DESCRIPTION = (
-    "当用户要查资料、核实当前信息、找来源或链接、了解真实经验、口碑、社区观点、"
-    "比较选项或寻找教程时主动使用，即使用户没有明确提到知乎。需要可检查的标题、链接"
-    "或证据时优先于 ask。scope='zhihu' 走知乎站内搜索；scope='web' 走全网搜索，"
-    "可选 filter 表达式。返回标题、链接、作者、赞同数和摘要等结构化结果。"
+    "需要知乎或中文社区证据时使用：真实经验、口碑、社区观点、对比、教程或可检查的中文来源。"
+    "需要标题、链接或证据时优先于 ask。scope='zhihu' 走知乎站内搜索（count 1-10）；"
+    "scope='web' 走全网搜索（count 1-20），可选 filter 表达式，但 filter 不能限定 zhihu.com。"
+    "返回标题、链接、作者、赞同数和摘要等结构化结果。"
 )
 
 ASK_TOOL_DESCRIPTION = (
-    "必须调用：当用户需要对一般知识问题作直接解释、综合回答或分析时使用，即使用户没有明确"
-    "提到知乎，或模型认为自己已经知道答案，也不要跳过本工具。如果用户主要需要来源、链接或"
-    "结果列表，应改用 search。model='fast' 适合日常回答；"
+    "用户明确要知乎直答生成的回答时使用。结果是另一个 AI 的综合，不是原始社区帖子；"
+    "需要来源、链接或结果列表时改用 search。model='fast' 适合日常回答；"
     "'thinking' 适合复杂分析；'agent' 较慢且会搜索或调用工具，仅在用户接受较长等待时使用。"
+    "模型可用性取决于账号授权。"
 )
 
 TRENDING_TOOL_DESCRIPTION = (
-    "当用户询问最近热点、当前热榜、现在大家在聊什么或近期热门讨论时主动使用，即使用户"
-    "没有明确提到知乎。返回当前知乎热榜的标题、链接、缩略图与摘要列表。"
+    "用户询问知乎热榜、国内当前热点或近期热门讨论时使用。"
+    "返回当前知乎热榜的标题、链接、缩略图与摘要列表（limit 最大 30）。"
 )
 
 
@@ -273,7 +273,10 @@ async def search(
         Field(min_length=2, max_length=100, description="搜索关键词。"),
     ],
     scope: Literal["zhihu", "web"] = "zhihu",
-    count: Annotated[int, Field(ge=1, le=20, description="返回条数。")] = 10,
+    count: Annotated[
+        int,
+        Field(ge=1, le=20, description="返回条数；zhihu 最多 10（超出按 10），web 最多 20。"),
+    ] = 10,
     filter: Annotated[
         str,
         Field(description="全网搜索筛选表达式；站内搜索忽略。"),
@@ -285,7 +288,7 @@ async def search(
     Args:
         query: 搜索关键词，2-100 字符。
         scope: 'zhihu' 站内 / 'web' 全网。
-        count: 返回条数（zhihu 1-10，web 1-20，默认 10）。
+        count: 返回条数（zhihu 最多 10，超出按 10；web 1-20；默认 10）。
         filter: 高级筛选表达式，仅 scope='web' 生效，例如
             ``host=="example.com" AND publish_time>=1778494631``。
         search_db: 全网搜索索引范围（all / realtime / static）。
@@ -400,7 +403,7 @@ async def quota(
 @mcp.tool(
     name="user_contents",
     description=(
-        "获取知乎用户公开创作内容。默认查询调用方本人；设置"
+        "获取本人（或 OAuth 授权用户）的公开创作内容。默认查询调用方本人；设置"
         " use_configured_oauth_user=true 时使用服务端 ZHIHU_OAUTH_TOKEN。"
         "支持 Paging.NextOffset 翻页。"
     ),
@@ -450,7 +453,7 @@ async def user_contents(
 
 @mcp.tool(
     name="user_followees",
-    description="获取知乎用户公开关注列表；可用 Paging.NextOffset 翻页。",
+    description="获取本人（或 OAuth 授权用户）的公开关注列表；可用 Paging.NextOffset 翻页。",
 )
 async def user_followees(
     offset: Annotated[
@@ -481,7 +484,7 @@ async def user_followees(
 
 @mcp.tool(
     name="user_collections",
-    description="获取知乎用户近期公开收藏；官方接口只提供 limit，不保证完整分页。",
+    description="获取本人（或 OAuth 授权用户）的近期公开收藏；官方接口只提供 limit，不保证完整分页。",
 )
 async def user_collections(
     limit: Annotated[
@@ -595,7 +598,7 @@ async def favlist_contents(
     description=(
         "推荐适合当前账号回答的知乎问题。省略 query 时按画像推荐，并不会把空字符串"
         "发给上游；传入主题时按主题推荐。不支持翻页，返回条数可以少于 count。"
-        "与本人全文、评论和创作统计共用 creator 额度。不接受 OAuth 身份切换。"
+        "与 question_answers 共用 question_discovery 额度。不接受 OAuth 身份切换。"
     ),
 )
 async def question_recommendations(
@@ -631,7 +634,7 @@ async def question_recommendations(
     description=(
         "获取一个知乎问题下的回答摘要。Summary 不是回答全文，也不是 AI 摘要。"
         "IsEnd=false 时把 NextOffset 原样作为下一次 offset；缺少 NextOffset 时停止翻页。"
-        "不要按本页条数计算偏移。使用 question_answers 额度。"
+        "不要按本页条数计算偏移。与 question_recommendations 共用 question_discovery 额度。"
     ),
 )
 async def question_answers(

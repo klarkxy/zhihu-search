@@ -458,7 +458,7 @@ def create_app(api_key: str | None = None) -> FastAPI:
         version=__version__,
         description=(
             "知乎开放平台 OpenAPI 工具服务器，提供搜索、直答、热榜、"
-            "官方额度、用户公开数据、问题发现、创作能力、知识库以及 PDF/PPT 异步任务操作。"
+            "官方额度、本人公开数据、问题发现、创作能力、知识库以及 PDF/PPT 异步任务操作。"
         ),
         lifespan=lifespan,
     )
@@ -550,7 +550,7 @@ def create_app(api_key: str | None = None) -> FastAPI:
         "/user/contents",
         response_model=ToolResponse,
         operation_id="user_contents",
-        summary="获取知乎用户公开创作内容",
+        summary="获取本人（或 OAuth 授权用户）的知乎公开创作内容",
     )
     async def user_contents(request: UserContentsRequest) -> ToolResponse:
         try:
@@ -579,7 +579,7 @@ def create_app(api_key: str | None = None) -> FastAPI:
         "/user/followees",
         response_model=ToolResponse,
         operation_id="user_followees",
-        summary="获取知乎用户公开关注列表",
+        summary="获取本人（或 OAuth 授权用户）的知乎公开关注列表",
     )
     async def user_followees(request: UserFolloweesRequest) -> ToolResponse:
         try:

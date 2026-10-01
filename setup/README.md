@@ -28,11 +28,12 @@ Secret，并只在自己的终端保存：
 
 ```bash
 uvx zhihu-search --save-token "<你的 Access Secret>"
-uvx zhihu-search --probe
+uvx zhihu-search --check-token
 ```
 
 不要把 Access Secret、OAuth `app_key` 或 OAuth token 发到聊天中，也不要
-写进客户端配置、截图或仓库。
+写进客户端配置、截图或仓库。需要确认端到端连通时，可选做一次
+`uvx zhihu-search --probe`（消耗一次 `hot_list` 额度）。
 
 ## 1. Skill（默认选择）
 
@@ -140,8 +141,9 @@ uvx zhihu-search --quota
 uvx zhihu-search --clear-token
 ```
 
-`--check-token` 不发起上游请求，只报告凭证状态和来源；`--probe` 会真实调用
-一次 `hot_list(limit=1)`；`--quota` 查询知乎官方额度，不使用本地计数。
+`--check-token` 不发起上游请求，只报告凭证状态和来源；`--probe` 是可选的
+一次真实 `hot_list(limit=1)` 调用，会消耗一次 `hot_list` 额度，不用于例行预检；
+`--quota` 查询知乎官方额度，不使用本地计数。
 
 | 现象 | 建议处理 |
 |---|---|

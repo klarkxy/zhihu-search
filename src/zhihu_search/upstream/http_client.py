@@ -432,7 +432,7 @@ class ZhihuRestClient:
         sort_order: SortOrder = "desc",
         oauth_token: str | None = None,
     ) -> ApiResult:
-        """获取用户公开创作内容。
+        """获取本人（或 OAuth 授权用户）的公开创作内容。
 
         不传 ``oauth_token`` 时查询调用方本人；传入时查询该 OAuth 凭证
         对应的已授权用户。``offset`` 可直接使用响应里的字符串
@@ -470,7 +470,7 @@ class ZhihuRestClient:
         limit: int = 20,
         oauth_token: str | None = None,
     ) -> ApiResult:
-        """获取用户公开关注列表。"""
+        """获取本人（或 OAuth 授权用户）的公开关注列表。"""
         self._validate_offset(offset)
         self._validate_limit(limit, maximum=USER_PAGE_MAX)
         return await self._envelope_get(
@@ -499,7 +499,7 @@ class ZhihuRestClient:
         limit: int = 20,
         oauth_token: str | None = None,
     ) -> ApiResult:
-        """获取用户公开收藏夹列表。"""
+        """获取本人（或 OAuth 授权用户）的公开收藏夹列表。"""
         self._validate_limit(limit)
         return await self._envelope_get(
             "/api/v1/user/favlists",

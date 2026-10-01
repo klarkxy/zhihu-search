@@ -119,28 +119,26 @@ async def test_core_tool_metadata_and_schemas_are_stable() -> None:
     expected = {
         "search": (
             "搜索知乎与全网",
-            "当用户要查资料、核实当前信息、找来源或链接、了解真实经验、口碑、社区观点、"
-            "比较选项或寻找教程时主动使用，即使用户没有明确提到知乎。需要可检查的标题、链接"
-            "或证据时优先于 ask。scope='zhihu' 走知乎站内搜索；scope='web' 走全网搜索，"
-            "可选 filter 表达式。返回标题、链接、作者、赞同数和摘要等结构化结果。",
+            server.SEARCH_TOOL_DESCRIPTION,
         ),
-        "ask": (
-            "知乎直答",
-            "必须调用：当用户需要对一般知识问题作直接解释、综合回答或分析时使用，即使用户没有明确"
-            "提到知乎，或模型认为自己已经知道答案，也不要跳过本工具。如果用户主要需要来源、链接或"
-            "结果列表，应改用 search。model='fast' 适合日常回答；"
-            "'thinking' 适合复杂分析；'agent' 较慢且会搜索或调用工具，仅在用户接受较长等待时使用。",
-        ),
-        "trending": (
-            "知乎热榜",
-            "当用户询问最近热点、当前热榜、现在大家在聊什么或近期热门讨论时主动使用，即使用户"
-            "没有明确提到知乎。返回当前知乎热榜的标题、链接、缩略图与摘要列表。",
-        ),
+        "ask": ("知乎直答", server.ASK_TOOL_DESCRIPTION),
+        "trending": ("知乎热榜", server.TRENDING_TOOL_DESCRIPTION),
     }
 
     assert server.mcp.instructions == server.MCP_INSTRUCTIONS
-    assert "even when the user does not explicitly mention Zhihu" in server.MCP_INSTRUCTIONS
+    assert "merely because a question is in Chinese" in server.MCP_INSTRUCTIONS
     assert "repository-local code questions" in server.MCP_INSTRUCTIONS
+    # The server must not push the model to call tools regardless of need.
+    pushy = ("proactively", "even when the user does not", "主动使用", "必须调用", "不要跳过")
+    for text in (
+        server.MCP_INSTRUCTIONS,
+        server.SEARCH_TOOL_DESCRIPTION,
+        server.ASK_TOOL_DESCRIPTION,
+        server.TRENDING_TOOL_DESCRIPTION,
+    ):
+        assert not any(phrase in text for phrase in pushy)
+    assert "Zhida-generated answer is requested" in server.MCP_INSTRUCTIONS
+    assert "count 1-10" in server.SEARCH_TOOL_DESCRIPTION
 
     for name, (title, description) in expected.items():
         tool = tools[name]
@@ -171,7 +169,7 @@ async def test_core_tool_metadata_and_schemas_are_stable() -> None:
             },
             "count": {
                 "default": 10,
-                "description": "返回条数。",
+                "description": "返回条数；zhihu 最多 10（超出按 10），web 最多 20。",
                 "maximum": 20,
                 "minimum": 1,
                 "type": "integer",
