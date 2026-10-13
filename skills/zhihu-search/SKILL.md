@@ -41,6 +41,8 @@ uvx zhihu-search --check-token
 uvx zhihu-search search "扫地机器人 长期使用 维护成本" --scope zhihu --count 5
 ```
 
+Call protection defaults to fresh free-quota checks and a local 100-request Beijing-day cap. Configure `ZHIHU_DAILY_CALL_LIMIT` or `--daily-call-limit`; paid use requires explicit `ZHIHU_ALLOW_PAID=true` or `--allow-paid`. Unpriced capabilities with known quota groups remain available in free mode; unknown quota mappings block. Local counts are not billing and cannot rule out charges caused by other clients on the same account.
+
 Global flags: `--check-token` (local credential check, no network), `--save-token`,
 `--clear-token`, `--quota` (official quota), `--probe` (one real `hot_list(limit=1)` call).
 

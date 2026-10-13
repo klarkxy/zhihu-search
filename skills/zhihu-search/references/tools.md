@@ -27,11 +27,11 @@ uvx zhihu-search trending --limit 30
 
 ```bash
 uvx zhihu-search quota
-uvx zhihu-search quota --api-id question_answers --api-id creator
+uvx zhihu-search quota --api-id question_discovery --api-id creator
 ```
 
 Returns `TotalQuota`, `TotalUsed`, `RemainingQuota` per API group. `--api-id` is repeatable;
-values: `global_search`, `zhihu_search`, `hot_list`, `question_answers`, `zhida_openai`,
+values: `global_search`, `zhihu_search`, `hot_list`, `question_discovery`, `zhida_openai`,
 `tools`, `knowledge`, `user_data`, `creator`. Querying quota is free. All Access Secrets of
 one account share the same quota; failed requests are not charged. `--quota` is the global
 flag equivalent.
@@ -66,10 +66,10 @@ uvx zhihu-search question-answers "https://www.zhihu.com/question/123456789" --o
 
 - `question-recommendations`: `--count` 1–20 (default 5). Without `--query`, results follow
   the account profile; a whitespace-only query is invalid. No paging; may return fewer than
-  `--count`. Uses the Access Secret; OAuth is not accepted. Quota group: `creator`.
+  `--count`. Uses the Access Secret; OAuth is not accepted. Quota group: `question_discovery`.
 - `question-answers`: answers under a question URL. `--offset`, `--limit` 1–50. Returns
   upstream `Summary` excerpts, not full text. Uses the Access Secret; OAuth is not accepted.
-  Quota group: `question_answers`.
+  Quota group: `question_discovery`.
 
 ## Own content and creator statistics
 

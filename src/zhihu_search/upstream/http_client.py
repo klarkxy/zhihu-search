@@ -32,6 +32,8 @@ from urllib.parse import quote, urlparse
 
 import httpx
 
+from ..call_policy import CallPolicy
+
 from .base import (
     InvalidArguments,
     McpError,
@@ -74,7 +76,8 @@ OfficialQuotaId = Literal[
     "global_search",
     "zhihu_search",
     "hot_list",
-    "question_answers",
+    "question_discovery",
+    "question_answers",  # legacy input alias
     "zhida_openai",
     "tools",
     "knowledge",
@@ -103,7 +106,8 @@ OFFICIAL_QUOTA_IDS: tuple[OfficialQuotaId, ...] = (
     "global_search",
     "zhihu_search",
     "hot_list",
-    "question_answers",
+    "question_discovery",
+    "question_answers",  # legacy input alias
     "zhida_openai",
     "tools",
     "knowledge",
@@ -208,6 +212,7 @@ class ZhihuRestClient:
         *,
         timeout: float = DEFAULT_TIMEOUT,
         client: Optional[httpx.AsyncClient] = None,
+        call_policy: CallPolicy | None = None,
     ) -> None:
         self._access_secret = access_secret
         self._timeout = timeout
@@ -215,6 +220,7 @@ class ZhihuRestClient:
             timeout=timeout, base_url=BASE_URL
         )
         self._owns_client = client is None
+        self._call_policy = call_policy
 
     # ------------------------------------------------------------------
     # 公共：构造请求 / 解析响应
@@ -240,6 +246,19 @@ class ZhihuRestClient:
             headers["Idempotency-Key"] = idempotency_key
         return headers
 
+    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        async def execute() -> httpx.Response:
+            return await self._client.request(method, path, **kwargs)
+
+        if path == "/api/v1/quota" and method == "GET":
+            return await execute()
+
+        async def quota(api_id: str) -> Any:
+            result = await self._envelope_get("/api/v1/quota", {"APIIDs": api_id})
+            return result.data
+
+        return await (self._call_policy or CallPolicy()).run(path, kwargs.get("json"), quota, execute)
+
     async def _envelope_get(
         self,
         path: str,
@@ -249,7 +268,7 @@ class ZhihuRestClient:
         oauth_token: str | None = None,
     ) -> ApiResult:
         try:
-            resp = await self._client.get(
+            resp = await self._request("GET",
                 path,
                 params=params,
                 headers=self._headers(oauth_token=oauth_token),
@@ -270,7 +289,7 @@ class ZhihuRestClient:
         idempotency_key: str | None = None,
     ) -> ApiResult:
         try:
-            resp = await self._client.post(
+            resp = await self._request("POST",
                 path,
                 json=body,
                 headers=self._headers(idempotency_key=idempotency_key),
@@ -415,7 +434,10 @@ class ZhihuRestClient:
                 raise InvalidArguments(
                     "未知官方额度项：" + ", ".join(dict.fromkeys(unknown))
                 )
-            params["APIIDs"] = ",".join(dict.fromkeys(api_ids))
+            params["APIIDs"] = ",".join(dict.fromkeys(
+                "question_discovery" if value == "question_answers" else value
+                for value in api_ids
+            ))
         return await self._envelope_get("/api/v1/quota", params)
 
     # ------------------------------------------------------------------
@@ -754,7 +776,7 @@ class ZhihuRestClient:
 
         try:
             with path.open("rb") as stream:
-                resp = await self._client.post(
+                resp = await self._request("POST",
                     "/api/v1/knowledge/files",
                     data=data,
                     files={
@@ -828,7 +850,7 @@ class ZhihuRestClient:
 
         try:
             with path.open("rb") as stream:
-                resp = await self._client.post(
+                resp = await self._request("POST",
                     "/resources/v1/files",
                     files={
                         "file": (
@@ -928,7 +950,7 @@ class ZhihuRestClient:
         }
         # 直答不返回信封，走 OpenAI chat 格式，单独解析
         try:
-            resp = await self._client.post(
+            resp = await self._request("POST",
                 "/v1/chat/completions",
                 json=body,
                 headers=self._headers(),

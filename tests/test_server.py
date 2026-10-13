@@ -98,6 +98,7 @@ async def test_new_tool_catalog_is_registered() -> None:
         "global_search",
         "zhihu_search",
         "hot_list",
+        "question_discovery",
         "question_answers",
         "zhida_openai",
         "tools",

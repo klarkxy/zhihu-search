@@ -76,6 +76,7 @@ def test_openapi_exposes_every_model_safe_new_operation() -> None:
         "global_search",
         "zhihu_search",
         "hot_list",
+        "question_discovery",
         "question_answers",
         "zhida_openai",
         "tools",

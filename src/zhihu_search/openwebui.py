@@ -114,6 +114,7 @@ class QuotaRequest(ToolRequest):
             "global_search",
             "zhihu_search",
             "hot_list",
+            "question_discovery",
             "question_answers",
             "zhida_openai",
             "tools",

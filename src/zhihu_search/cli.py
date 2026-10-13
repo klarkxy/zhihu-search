@@ -84,6 +84,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="调用 hot_list(limit=1) 一次，打印响应。用于端到端验证。",
     )
 
+    p.add_argument("--allow-paid", action="store_true", help="显式允许已确认价格的 API 扣余额；仍受每日调用上限保护。")
+    p.add_argument("--daily-call-limit", type=int, help="本地北京时间每日业务请求上限，默认 100（1-100000）。")
+
     # 子命令
     sub = p.add_subparsers(
         dest="command",
@@ -989,6 +992,14 @@ def _run_install_skill(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+
+    if args.allow_paid:
+        os.environ["ZHIHU_ALLOW_PAID"] = "true"
+    if args.daily_call_limit is not None:
+        if not 1 <= args.daily_call_limit <= 100000:
+            print("FAIL  daily-call-limit 必须为 1-100000 的整数", file=sys.stderr)
+            return 1
+        os.environ["ZHIHU_DAILY_CALL_LIMIT"] = str(args.daily_call_limit)
 
     # --- flags（优先处理，与旧版行为一致） ---
     if args.save_token:

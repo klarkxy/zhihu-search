@@ -369,6 +369,7 @@ async def quota(
                     "global_search",
                     "zhihu_search",
                     "hot_list",
+                    "question_discovery",
                     "question_answers",
                     "zhida_openai",
                     "tools",
@@ -589,7 +590,7 @@ async def favlist_contents(
     description=(
         "推荐适合当前账号回答的知乎问题。省略 query 时按画像推荐，并不会把空字符串"
         "发给上游；传入主题时按主题推荐。不支持翻页，返回条数可以少于 count。"
-        "使用 creator 额度。不接受 OAuth 身份切换。"
+        "使用 question_discovery 额度；免费模式须有足够额度，付费模式因计费未确认而阻止。不接受 OAuth 身份切换。"
     ),
 )
 async def question_recommendations(
@@ -625,7 +626,7 @@ async def question_recommendations(
     description=(
         "获取一个知乎问题下的回答摘要。Summary 不是回答全文，也不是 AI 摘要。"
         "IsEnd=false 时 NextOffset 即下一页 offset；缺少 NextOffset 表示没有下一页。"
-        "偏移不等于已返回条数。使用 question_answers 额度。"
+        "偏移不等于已返回条数。使用 question_discovery 额度。"
     ),
 )
 async def question_answers(
