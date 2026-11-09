@@ -9,8 +9,23 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _isolate_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """每个测试用例使用独立的应用配置目录。"""
+    """每个测试用例使用独立的应用配置目录，并避开真实的发布凭证。"""
     monkeypatch.setenv("ZHIHU_SEARCH_HOME", str(tmp_path))
+    from zhihu_search import openapi_credentials
+
+    monkeypatch.setattr(
+        openapi_credentials,
+        "shared_credentials_path",
+        lambda: tmp_path / "shared-openapi.json",
+    )
+    for name in (
+        "ZHIHU_OPENAPI_APP_KEY",
+        "ZHIHU_OPENAPI_APP_SECRET",
+        "ZHIHU_PUBLISH_BASE_URL",
+        "ZHIHU_PUBLISH_EXTRA_INFO",
+        "ZHIHU_SYNC_DAILY_PUBLISH_LIMIT",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)

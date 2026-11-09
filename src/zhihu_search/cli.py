@@ -30,13 +30,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
-from . import __version__, commands, credentials, formatters
+from . import __version__, commands, credentials, formatters, openapi_credentials
 from .upstream.http_client import OFFICIAL_QUOTA_IDS
 
 
@@ -83,6 +85,26 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="调用 hot_list(limit=1) 一次，打印响应。用于端到端验证。",
     )
+    p.add_argument(
+        "--save-openapi",
+        metavar="TEXT",
+        help="解析并保存知乎发布授权说明（含 App Key 与 App Secret），然后退出。",
+    )
+    p.add_argument(
+        "--save-openapi-file",
+        metavar="PATH",
+        help="从本地文本文件读取发布授权说明并保存，然后退出。",
+    )
+    p.add_argument(
+        "--check-openapi",
+        action="store_true",
+        help="检查发布 OpenAPI 凭证是否存在。不输出 App Secret，也不发请求。",
+    )
+    p.add_argument(
+        "--clear-openapi",
+        action="store_true",
+        help="删除本机保存的发布 OpenAPI 凭证。不删除官方共享文件。",
+    )
 
     p.add_argument("--allow-paid", action="store_true", help="显式允许已确认价格的 API 扣余额；仍受每日调用上限保护。")
     p.add_argument("--daily-call-limit", type=int, help="本地北京时间每日业务请求上限，默认 100（1-100000）。")
@@ -92,7 +114,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="command",
         metavar=(
             "{install-skill,search,ask,trending,user-*,question-*,"
-            "creator-*,knowledge-*,quota,pdf-*,ppt-*,oauth-*,serve,openwebui}"
+            "creator-*,knowledge-*,quota,pdf-*,ppt-*,oauth-*,sync-*,serve,openwebui}"
         ),
     )
 
@@ -130,7 +152,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "工具开关：档位 compact（默认）、knowledge、user、questions、"
-            "creator、office、full，或逗号分隔的档位与工具名混写"
+            "creator、office、full、sync，或逗号分隔的档位与工具名混写"
             "（如 knowledge,user）；也可设置 ZHIHU_MCP_TOOLS。"
         ),
     )
@@ -144,6 +166,52 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="可选 API key。设置后工具接口要求 Authorization: Bearer <key>。",
     )
+
+    def _add_sync_content_flags(parser: argparse.ArgumentParser, *, require_body: bool) -> None:
+        parser.add_argument("--type", choices=["article", "question", "pin"], help="内容形态。")
+        parser.add_argument("--title", default="", help="标题。")
+        parser.add_argument("--body", default=None, help="正文。与 --body-file 二选一。")
+        parser.add_argument("--body-file", default=None, help="从 UTF-8 文件读取正文；用 - 表示标准输入。")
+        parser.add_argument("--body-format", choices=["markdown", "html"], default="markdown")
+        parser.add_argument("--draft-file", default=None, help="完整草稿 JSON。")
+        parser.add_argument("--id", default=None, help="已有草稿 ID。")
+        parser.add_argument("--revision", type=int, default=None, help="更新已有草稿时的 revision。")
+        parser.add_argument("--images-json", default=None, help="已上传图片的 JSON 数组。")
+        parser.add_argument("--link-card-json", default=None, help="想法链接卡片 JSON。")
+        parser.add_argument("--comment-permission", default=None)
+        parser.add_argument("--creation-statement", default=None)
+        parser.add_argument("--table-of-contents", action="store_true")
+        parser.add_argument("--topics", action="append", default=None, help="知乎话题链接，可重复。")
+        parser.add_argument("--ring", default=None, help="想法的知乎圈子链接。")
+        parser.add_argument("--format", choices=["markdown", "json"], default="markdown")
+        parser.set_defaults(_sync_require_body=require_body)
+
+    sync_save = sub.add_parser("sync-save", help="保存知乎文章、提问或想法草稿。")
+    _add_sync_content_flags(sync_save, require_body=True)
+    sync_list = sub.add_parser("sync-list", help="列出本地同步草稿。")
+    sync_list.add_argument("--offset", type=int, default=0)
+    sync_list.add_argument("--format", choices=["markdown", "json"], default="markdown")
+    sync_get = sub.add_parser("sync-get", help="读取一份本地同步草稿。")
+    sync_get.add_argument("draft_id")
+    sync_get.add_argument("--format", choices=["markdown", "json"], default="markdown")
+    sync_prepare = sub.add_parser("sync-prepare", help="校验草稿并在通过时签发预览令牌。")
+    _add_sync_content_flags(sync_prepare, require_body=False)
+    sync_prepare.add_argument("draft_id", nargs="?", default=None)
+    sync_preview = sub.add_parser("sync-preview", help="生成本地预览 HTML。")
+    sync_preview.add_argument("draft_id")
+    sync_preview.add_argument("--output", default=None, help="预览目录；默认写到配置目录。")
+    sync_preview.add_argument("--open", action="store_true", help="尝试用系统浏览器打开预览。")
+    sync_preview.add_argument("--format", choices=["markdown", "json"], default="markdown")
+    sync_publish = sub.add_parser("sync-publish", help="用户确认预览后发布到知乎。")
+    sync_publish.add_argument("draft_id")
+    sync_publish.add_argument("--confirm", action="store_true", help="确认已经核对最新预览。")
+    sync_publish.add_argument("--preview-token", required=True, help="sync-prepare 或 sync-preview 返回的令牌。")
+    sync_publish.add_argument("--output", default=None, help="可选，写入 publish 请求与响应。")
+    sync_publish.add_argument("--format", choices=["markdown", "json"], default="markdown")
+    sync_upload = sub.add_parser("sync-upload-image", help="上传一张本地图片到知乎。")
+    sync_upload.add_argument("path", help="本地图片路径。")
+    sync_upload.add_argument("--scene", required=True, choices=["article", "question", "pin"])
+    sync_upload.add_argument("--format", choices=["markdown", "json"], default="markdown")
 
     # --- search ---
     sp = sub.add_parser("search", help="搜索知乎内容。")
@@ -985,6 +1053,157 @@ def _run_install_skill(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_sync_draft(args: argparse.Namespace) -> dict | None:
+    if getattr(args, "draft_file", None):
+        try:
+            payload = json.loads(Path(args.draft_file).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"无法读取草稿文件：{exc}") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("草稿文件必须是 JSON 对象。")
+        return payload
+    has_inline = bool(getattr(args, "type", None) or args.body or args.body_file)
+    if not has_inline:
+        return None
+    body = args.body
+    if args.body_file:
+        if args.body_file == "-":
+            body = sys.stdin.read()
+        else:
+            try:
+                body = Path(args.body_file).read_text(encoding="utf-8")
+            except OSError as exc:
+                raise RuntimeError(f"无法读取正文文件：{exc}") from exc
+    draft: dict = {
+        "type": args.type,
+        "title": args.title or "",
+        "body": body or "",
+        "format": args.body_format,
+    }
+    if args.images_json:
+        draft["images"] = json.loads(args.images_json)
+    if args.link_card_json:
+        draft["link_card"] = json.loads(args.link_card_json)
+    settings: dict = {}
+    if args.comment_permission:
+        settings["comment_permission"] = args.comment_permission
+    if args.creation_statement:
+        settings["creation_statement"] = args.creation_statement
+    if args.table_of_contents:
+        settings["table_of_contents_enabled"] = True
+    if args.topics:
+        settings["topics"] = args.topics
+    if args.ring:
+        settings["ring"] = args.ring
+    if settings:
+        draft["settings"] = settings
+    return draft
+
+
+def _print_sync(result: commands.CommandResult, kind: str, output_format: str) -> int:
+    if output_format == "json":
+        return _print_json(result, kind)
+    if not result.success:
+        print(f"[错误] {result.error}", file=sys.stderr)
+        return 1
+    print(_format_sync_markdown(kind, result.data or {}))
+    return 0
+
+
+def _format_sync_markdown(kind: str, data: dict) -> str:
+    if kind == "sync_prepare" or kind == "sync_preview":
+        prepared = data.get("prepared") or {}
+        counts = prepared.get("counts") or {}
+        lines = [
+            f"草稿 {data.get('record', {}).get('id')} 修订 {data.get('record', {}).get('revision')}",
+            f"可以发布：{'是' if prepared.get('can_publish') else '否'}",
+            f"标题 {counts.get('title_chars', 0)} 字，正文 {counts.get('body_chars', 0)} 字",
+        ]
+        if data.get("preview_token"):
+            lines.append(f"预览令牌：{data['preview_token']}")
+        if data.get("preview_path"):
+            lines.append(f"预览文件：{data['preview_path']}")
+        for issue in prepared.get("issues") or []:
+            lines.append(f"- [{issue.get('severity')}] {issue.get('code')}：{issue.get('message')}")
+        if prepared.get("html"):
+            lines.extend(["", prepared["html"]])
+        return "\n".join(lines)
+    if kind == "sync_publish":
+        published = data.get("published") or {}
+        return (
+            f"已发布{published.get('type') or ''}：{published.get('url')}\n"
+            f"content_token：{published.get('content_token')}"
+        )
+    if kind == "sync_upload_image":
+        lines = [f"图片：{data.get('url')}", f"media_id：{data.get('media_id')}"]
+        for warning in data.get("warnings") or []:
+            lines.append(f"注意：{warning}")
+        return "\n".join(lines)
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def _sync_error_result(exc: Exception) -> commands.CommandResult:
+    return commands.CommandResult(success=False, error=str(exc))
+
+
+def _dispatch_sync(args: argparse.Namespace) -> int:
+    from .sync import service
+
+    output_format = getattr(args, "format", "markdown")
+    try:
+        if args.command == "sync-list":
+            data = service.list_drafts(args.offset)
+            return _print_sync(commands.CommandResult(success=True, data=data), "sync_list", output_format)
+        if args.command == "sync-get":
+            data = service.get_draft(args.draft_id)
+            return _print_sync(commands.CommandResult(success=True, data=data), "sync_get", output_format)
+        if args.command == "sync-save":
+            draft = _load_sync_draft(args)
+            if draft is None:
+                raise service.SyncServiceError("bad-request", "请用 --draft-file 或 --type 与正文提供草稿。")
+            data = service.save_draft(draft, draft_id=args.id, expected_revision=args.revision)
+            return _print_sync(commands.CommandResult(success=True, data=data), "sync_save", output_format)
+        if args.command == "sync-prepare":
+            draft = _load_sync_draft(args)
+            draft_id = args.draft_id or args.id
+            if draft is None and not draft_id:
+                raise service.SyncServiceError("bad-request", "请提供草稿 ID，或用 --type 与正文创建草稿。")
+            data = service.prepare_saved(draft_id, draft, expected_revision=args.revision)
+            return _print_sync(commands.CommandResult(success=True, data=data), "sync_prepare", output_format)
+        if args.command == "sync-preview":
+            data = service.preview_draft(
+                args.draft_id,
+                output_dir=Path(args.output) if args.output else None,
+                open_browser=args.open,
+            )
+            return _print_sync(commands.CommandResult(success=True, data=data), "sync_preview", output_format)
+        if args.command == "sync-publish":
+            data = asyncio.run(
+                service.publish_draft(
+                    args.draft_id,
+                    confirmed=args.confirm,
+                    preview_token=args.preview_token,
+                    output_dir=Path(args.output) if args.output else None,
+                )
+            )
+            return _print_sync(commands.CommandResult(success=True, data=data), "sync_publish", output_format)
+        if args.command == "sync-upload-image":
+            raw = Path(args.path).read_bytes()
+            data = asyncio.run(
+                service.upload_image(
+                    file_name=Path(args.path).name,
+                    content_base64=base64.b64encode(raw).decode("ascii"),
+                    scene=args.scene,
+                )
+            )
+            return _print_sync(commands.CommandResult(success=True, data=data), "sync_upload_image", output_format)
+    except service.SyncServiceError as exc:
+        return _print_sync(_sync_error_result(exc), args.command.replace("-", "_"), output_format)
+    except RuntimeError as exc:
+        return _print_sync(_sync_error_result(exc), args.command.replace("-", "_"), output_format)
+    return 2
+
+
 # ---------------------------------------------------------------------------
 # 主入口
 # ---------------------------------------------------------------------------
@@ -1021,6 +1240,38 @@ def main(argv: list[str] | None = None) -> int:
             print(f"FAIL  {e}", file=sys.stderr)
             return 1
         _print_credentials_info(creds)
+        return 0
+
+    if args.save_openapi and args.save_openapi_file:
+        print("FAIL  --save-openapi 与 --save-openapi-file 只能使用一个", file=sys.stderr)
+        return 2
+    if args.save_openapi or args.save_openapi_file:
+        try:
+            if args.save_openapi_file:
+                text = Path(args.save_openapi_file).read_text(encoding="utf-8")
+            else:
+                text = args.save_openapi
+            openapi_credentials.save_authorization(text)
+        except (OSError, openapi_credentials.OpenApiCredentialsError) as exc:
+            print(f"FAIL  {exc}", file=sys.stderr)
+            return 1
+        print("OK  已保存知乎发布凭证（未显示 App Secret）")
+        return 0
+
+    if args.clear_openapi:
+        if openapi_credentials.clear():
+            print("OK  已删除本地发布凭证")
+        else:
+            print("OK  本地发布凭证本来就不存在")
+        print("共享凭证文件未改动。")
+        return 0
+
+    if args.check_openapi:
+        status = openapi_credentials.describe()
+        if not status["configured"]:
+            print(f"FAIL  {status['detail']}", file=sys.stderr)
+            return 1
+        print(f"OK  发布凭证已配置（来源：{status['source']}，App Key：{status['app_key']}）")
         return 0
 
     if args.quota:
@@ -1061,6 +1312,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_install_skill(args)
 
     try:
+        if args.command and args.command.startswith("sync-"):
+            return _dispatch_sync(args)
         if args.command == "oauth-url":
             return _run_oauth_url(args)
         if args.command == "oauth-token":

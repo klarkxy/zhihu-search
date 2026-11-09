@@ -29,3 +29,6 @@ htmlcov/
 # Local credentials
 credentials.json
 *.token
+
+# Zhihu sync preview/publish artifacts
+.zhihu-publish-output/

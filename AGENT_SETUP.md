@@ -116,7 +116,23 @@ args:    zhihu-search serve --tools compact
 6. 用一条真实资料查询确认 `search` 成功并返回链接。
 
 工具数量应为：compact 4 个、knowledge 7 个、office 8 个、user 9 个、
-questions 6 个、creator 8 个、full 23 个。不要擅自结束用户的客户端进程。
+questions 6 个、creator 8 个、full 23 个。`sync` 是另外 11 个
+（4 个核心加 7 个同步工具），不改变上面的数量。不要擅自结束用户的客户端进程。
+
+## 发布到知乎
+
+只有用户明确要把已有内容发到知乎时才做这一步。发布凭证和搜索 Access Secret
+不是同一项，申请页是 <https://www.zhihu.com/playground/zhihu-sync>。让用户在
+自己的终端保存整段授权说明，不要把 App Secret 贴进聊天：
+
+```bash
+uvx zhihu-search --save-openapi "<授权说明全文>"
+uvx zhihu-search --check-openapi
+```
+
+先校验和预览，把预览给用户看。用户明确确认后才能执行
+`sync-publish --confirm`。生成预览不算确认。MCP 只有在用户要常驻使用时才加
+`--tools sync`。视频不支持。
 
 ## 3. DeepSeek Harness：改用独立插件
 

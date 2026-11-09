@@ -69,7 +69,8 @@ MCP 是 Skill 之后的高频集成选项。默认使用 `compact`，避免把�
 | `questions` | compact 加 `question_recommendations`、`question_answers` |
 | `creator` | compact 加 `user_content_detail`、`user_content_comments`、`creator_account_stats`、`creator_content_stats` |
 | `office` | compact 加 `pdf_create`、`pdf_status`、`ppt_create`、`ppt_status` |
-| `full` | 上表 22 个业务/账号工具，加 `other`，共 23 个 |
+| `sync` | compact 加 `sync_save`、`sync_list`、`sync_get`、`sync_prepare`、`sync_preview`、`sync_publish`、`sync_upload_image` |
+| `full` | 上表 22 个业务/账号工具，加 `other`，共 23 个。不含 `sync` |
 
 选择值是逗号分隔的档位名与工具名混写，结果取并集，例如 `knowledge,user`
 或 `compact,knowledge_search`。只写工具名时为严格 allowlist，例如
@@ -91,7 +92,27 @@ allowlist 下只能管理其中已允许的名称，无法展开列表外工具�
 启动参数为 `--tools`；也可用 `ZHIHU_MCP_TOOLS` 设置默认值，命令行优先。
 这里的数量容易混淆：MCP `full` 是 **23 个工具**（22 个业务/账号工具加
 `other`）；OpenAPI 是 **22 个业务/账号操作**，没有会话级 `other`。
-搜索仍是一个工具覆盖知乎搜索和全网搜索两个端点。
+搜索仍是一个工具覆盖知乎搜索和全网搜索两个端点。`sync` 是另一组 7 个工具，
+默认不加载，`other` 也不会展开。
+
+## 知乎同步发布
+
+这不是上面那 25 个 Bearer 端点。文章、提问和想法走知乎同步助手的发布
+OpenAPI，HMAC-SHA256 签名，主机固定为 `https://openapi.zhihu.com`：
+
+| 能力 | HTTP | CLI | MCP `sync` |
+|---|---|---|---|
+| 发布 | `POST /openapi/publish` | `sync-publish --confirm` | `sync_publish` |
+| 图片上传 | `POST /openapi/media/uploads` 及后续直传、提交、水印 | `sync-upload-image` | `sync_upload_image`（base64，不接收本地路径） |
+| 草稿、校验、预览 | 本地 | `sync-save`、`sync-list`、`sync-get`、`sync-prepare`、`sync-preview` | 同名下划线工具 |
+
+凭证是 `ZHIHU_OPENAPI_APP_KEY` 与 `ZHIHU_OPENAPI_APP_SECRET`，申请页为
+<https://www.zhihu.com/playground/zhihu-sync>。规则来自知乎官方同步助手
+（[Zhihu/ZhihuSync](https://github.com/Zhihu/ZhihuSync)，MIT，author zhihu），
+本仓库是独立实现。发布必须先校验和预览，并且用户明确确认；不确定的结果会锁住
+草稿，不会自动重试。它不走搜索接口的免费额度预检，本机另有北京时间每天 50 次
+发布尝试上限。OpenWebUI 不暴露这组能力。密钥不能作为工具参数，也不能出现在
+输出里。
 
 ## 官方文档没有说清的地方
 
@@ -123,6 +144,8 @@ allowlist 下只能管理其中已允许的名称，无法展开列表外工具�
 
 - PDF 与知识库本机路径只允许 CLI/Python 读取，MCP/OpenAPI 不接收路径。
 - OAuth `app_key` 和 token 交换只允许 CLI/Python 执行。
+- 发布 OpenAPI 的 App Secret 只从环境变量或本机凭证文件读取。MCP 不接收它，
+  发布工具还必须带上用户确认和当次预览令牌。
 - 用户 OAuth token 只放在服务端 `ZHIHU_OAUTH_TOKEN`；模型侧只看到
   `use_configured_oauth_user` 布尔开关。
 - OpenAPI 只有配置 `--api-key` 或 `ZHIHU_OPENWEBUI_API_KEY` 时才启用

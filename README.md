@@ -87,7 +87,8 @@ args:    zhihu-search serve --tools compact
 | `questions` | compact 加问题推荐和问题回答摘要 |
 | `creator` | compact 加全文、评论和 2 个创作统计工具 |
 | `office` | compact 加 2 个 PDF 和 2 个 PPT 工具 |
-| `full` | 22 个业务/账号工具加 `other`，共 23 个 |
+| `sync` | compact 加 7 个同步工具：保存/读取草稿、校验、预览、确认后发布、上传图片 |
+| `full` | 22 个业务/账号工具加 `other`，共 23 个。不含 `sync` |
 
 档位和工具名可以用逗号组合，例如 `knowledge,user` 或
 `compact,knowledge_search`。只写工具名时是严格 allowlist，例如
@@ -96,7 +97,7 @@ args:    zhihu-search serve --tools compact
 
 `other` 的 `enable`、`disable`、`reset` 只影响当前 MCP 会话。使用档位时，
 它能管理全部 19 个低频工具；使用纯工具名 allowlist 时，它不能越过启动时的
-允许范围。
+允许范围。`sync` 不在这 19 个里面，`other` 不会把它展开。
 
 客户端配置：
 
@@ -145,6 +146,26 @@ uvx zhihu-search <command> --help
 
 在仓库内验证尚未发布的代码时，把命令开头改为
 `uvx --from . zhihu-search`。
+
+### 同步到知乎
+
+把已有文章、提问或想法适配成知乎格式、本地预览，并在你明确确认后发布。
+这组凭证与搜索 Access Secret 不是同一项，在
+[知乎同步助手申请页](https://www.zhihu.com/playground/zhihu-sync)获取：
+
+```bash
+uvx zhihu-search --save-openapi "<授权说明全文>"
+uvx zhihu-search --check-openapi
+uvx zhihu-search sync-prepare --type article --title "创造力，从何而来？" --body-file ./draft.md
+uvx zhihu-search sync-preview <draft-id>
+uvx zhihu-search sync-publish <draft-id> --confirm --preview-token <token>
+```
+
+`--save-openapi` 接受知乎给出的整段授权说明，其中要写成
+`ZHIHU_OPENAPI_APP_KEY:"…"` 和 `ZHIHU_OPENAPI_APP_SECRET:"…"`。
+`--check-openapi` 只报告来源和 App Key，不显示 App Secret。
+没有预览、也没有你的明确确认时，发布命令不会请求知乎。视频不支持。
+高频 MCP 需要单独选择 `sync` 档位。OpenWebUI 不提供发布。
 
 ### DeepSeek Harness
 

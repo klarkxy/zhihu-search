@@ -1,6 +1,6 @@
 interface:
   display_name: "Zhihu Search"
-  short_description: "知乎开放平台工具：搜索、直答、热榜、问题、账号、知识库与 PDF/PPT"
+  short_description: "知乎搜索、直答、热榜，以及确认后的文章、提问与想法发布"
   default_prompt: "Use $zhihu-search for this request. Its tools are available as a matching visible Zhihu MCP tool or through the CLI on demand; see the Skill for each tool's parameters and limits."
 
 policy:

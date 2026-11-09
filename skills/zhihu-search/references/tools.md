@@ -148,6 +148,27 @@ uvx zhihu-search oauth-token my_app_id "https://example.com/callback" auth_code_
   `ZHIHU_OAUTH_APP_KEY`. The output is a credential; store it as `ZHIHU_OAUTH_TOKEN` for the
   user-data tools.
 
+## Zhihu sync
+
+Publishing is consequential. Run prepare and preview, then wait for an explicit
+user confirmation before `sync-publish`. Rules: [sync](sync.md).
+
+```bash
+uvx zhihu-search sync-save --type pin --title "" --body "今天读完了 #读书笔记#"
+uvx zhihu-search sync-list
+uvx zhihu-search sync-get draft_id
+uvx zhihu-search sync-prepare --type article --title "创造力，从何而来？" --body-file ./draft.md
+uvx zhihu-search sync-preview draft_id
+uvx zhihu-search sync-publish draft_id --confirm --preview-token preview_token
+uvx zhihu-search sync-upload-image ./photo.png --scene article
+```
+
+- `sync-prepare` validates and, when the draft can be published, returns `preview_token`.
+- `sync-preview` writes a local HTML file. That file is not the publish request.
+- `sync-publish` requires `--confirm` and the token from the latest preview.
+- `sync-upload-image` reads a local image. MCP upload takes base64 instead of a path.
+- Video is rejected. Publisher secrets are never command output or tool arguments.
+
 ## Other commands
 
 - `serve --tools <profile|tool,…>`: starts the stdio MCP server with the given profile or

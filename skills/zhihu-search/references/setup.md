@@ -39,6 +39,18 @@ Access Secrets, OAuth app keys, and OAuth tokens are never pasted into chat, and
 credentials file is never read or printed. `ZHIHU_ACCESS_SECRET` takes precedence over the
 local credentials file. `--clear-token` removes the saved secret.
 
+Publishing uses a separate pair, `ZHIHU_OPENAPI_APP_KEY` and `ZHIHU_OPENAPI_APP_SECRET`,
+from <https://www.zhihu.com/playground/zhihu-sync>. Save the authorization text in the
+user's terminal, not in chat:
+
+```bash
+uvx zhihu-search --save-openapi "<授权说明全文>"
+uvx zhihu-search --check-openapi
+```
+
+`--check-openapi` reports the source and App Key. It must not print the App Secret.
+Profile `sync` exposes the publish tools; `compact` does not. See [sync](sync.md).
+
 ```bash
 uvx zhihu-search --probe
 ```

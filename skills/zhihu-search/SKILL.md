@@ -1,7 +1,7 @@
 ---
 name: zhihu-search
 description: >-
-  Research Zhihu and Chinese-community viewpoints with source links: 知乎/知乎链接、真实体验、口碑、避坑、大家怎么看、国内用户观点、中文社区、国内热点、查中文来源. Use for requested Zhihu search, question answers, Zhida answers, hot lists, account quota, authorized user/creator data, knowledge bases, PDF/PPT tasks, or zhihu-search setup. Do not trigger merely because a question is in Chinese. Exclude repository-local code questions, pure math or logic, translation, and user-provided content unless external community evidence is requested; respect no-browsing and source restrictions. Account data, uploads, task creation, and OAuth require an explicit request.
+  Research Zhihu and Chinese-community viewpoints with source links: 知乎/知乎链接、真实体验、口碑、避坑、大家怎么看、国内用户观点、中文社区、国内热点、查中文来源. Use for requested Zhihu search, question answers, Zhida answers, hot lists, account quota, authorized user/creator data, knowledge bases, PDF/PPT tasks, zhihu-search setup, or an explicit request to adapt, preview, or publish existing content to Zhihu (article, question, pin, 知乎同步助手). Do not trigger merely because a question is in Chinese. Exclude repository-local code questions, pure math or logic, translation, and user-provided content unless external community evidence is requested; respect no-browsing and source restrictions. Account data, uploads, task creation, OAuth, and publishing require an explicit request.
 ---
 
 # zhihu-search
@@ -24,13 +24,15 @@ describes what each tool does and how to call it. Full per-tool parameters are i
 | `questions` | `question_recommendations`, `question_answers` |
 | `creator` | `user_content_detail`, `user_content_comments`, `creator_account_stats`, `creator_content_stats` |
 | `office` | `pdf_create`, `pdf_status`, `ppt_create`, `ppt_status` |
-| `full` | all of the above plus `quota` |
+| `sync` | `sync_save`, `sync_list`, `sync_get`, `sync_prepare`, `sync_preview`, `sync_publish`, `sync_upload_image` |
+| `full` | all of the above except `sync`, plus `quota` |
 
 In `compact`, `other(action="enable")` registers the remaining tools for the current
 session; hosts that cache the catalog need a refresh to see them. A selection made only
 of explicit tool names is a strict allowlist and `other` cannot extend it. Local uploads
-(`knowledge-upload`, `pdf-upload`) and OAuth helpers exist only in the CLI. MCP tools do not
-accept local paths, Access Secrets, OAuth app keys, or OAuth tokens as arguments.
+(`knowledge-upload`, `pdf-upload`) and OAuth helpers exist only in the CLI. `sync` is opt-in and
+is not included in `compact` or revealed by `other`. MCP tools do not
+accept local paths, Access Secrets, OAuth app keys, OAuth tokens, or publisher app secrets as arguments.
 
 **CLI.** `uvx zhihu-search <command> …`, or `zhihu-search <command> …` when installed.
 Every command has `--help`. Bare `uvx zhihu-search` with no command starts the stdio MCP
@@ -44,7 +46,8 @@ uvx zhihu-search search "扫地机器人 长期使用 维护成本" --scope zhih
 Call protection defaults to fresh free-quota checks and a local 100-request Beijing-day cap. Configure `ZHIHU_DAILY_CALL_LIMIT` or `--daily-call-limit`; paid use requires explicit `ZHIHU_ALLOW_PAID=true` or `--allow-paid`. Unpriced capabilities with known quota groups remain available in free mode; unknown quota mappings block. Local counts are not billing and cannot rule out charges caused by other clients on the same account.
 
 Global flags: `--check-token` (local credential check, no network), `--save-token`,
-`--clear-token`, `--quota` (official quota), `--probe` (one real `hot_list(limit=1)` call).
+`--clear-token`, `--check-openapi`, `--save-openapi`, `--clear-openapi`, `--quota` (official quota), `--probe` (one real `hot_list(limit=1)` call).
+Publisher credentials are `ZHIHU_OPENAPI_APP_KEY` and `ZHIHU_OPENAPI_APP_SECRET`, separate from the search Access Secret.
 
 ## Tools at a glance
 
@@ -64,6 +67,22 @@ Global flags: `--check-token` (local credential check, no network), `--save-toke
 | `pdf-upload`, `pdf-create`, `pdf-status` | PDF parsing: upload → task → status | file_id valid 24 h |
 | `ppt-create`, `ppt-status` | Generate a PPT from a Zhihu answer/article URL | `--pages` 6–21 |
 | `oauth-url`, `oauth-token` | OAuth authorization URL / code exchange (CLI only) | needs `ZHIHU_OAUTH_APP_KEY` |
+| `sync-prepare`, `sync-preview`, `sync-publish` | Adapt, preview, then publish an article, question, or pin | publish only after explicit confirmation; see [sync](references/sync.md) |
+
+## Publishing to Zhihu
+
+Publishing is a consequential, public action. Validate and preview first. Do not
+call `sync-publish` or `sync_publish` until the user has explicitly confirmed the
+latest preview in this conversation (`确认发布`, `预览没问题`, or equivalent).
+Generating a preview is not confirmation. Do not rewrite the user's text to pass
+a length check, do not publish video, and do not repeat publisher secrets.
+Details and commands: [sync](references/sync.md).
+
+```bash
+uvx zhihu-search --check-openapi
+uvx zhihu-search sync-prepare --type article --title "创造力，从何而来？" --body-file ./draft.md
+uvx zhihu-search sync-preview draft_id
+```
 
 ## Output contract
 

@@ -87,7 +87,8 @@ uvx zhihu-search serve --tools compact
 | `questions` | compact 加问题推荐和问题回答摘要 |
 | `creator` | compact 加全文、评论和 2 个创作统计工具 |
 | `office` | compact 加 4 个 PDF/PPT 工具 |
-| `full` | 22 个业务/账号工具加 `other`，共 23 个 |
+| `sync` | compact 加 7 个同步工具；确认预览后才能发布 |
+| `full` | 22 个业务/账号工具加 `other`，共 23 个。不含 `sync` |
 
 `other` 可以在当前会话中展开、收起或复原 19 个低频工具。档位和工具名可用
 逗号组合，例如 `knowledge,user` 或 `compact,knowledge_search`；只写工具名

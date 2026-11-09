@@ -77,6 +77,8 @@ def test_main_skill_keeps_specialized_detail_in_references() -> None:
         "creator-content-stats", "knowledge-bases", "knowledge-items", "knowledge-search",
         "knowledge-upload", "pdf-upload", "pdf-create", "pdf-status", "ppt-create",
         "ppt-status", "oauth-url", "oauth-token",
+        "sync-save", "sync-list", "sync-get", "sync-prepare", "sync-preview",
+        "sync-publish", "sync-upload-image",
     ):
         assert f"uvx zhihu-search {command} " in tools or f"uvx zhihu-search {command}\n" in tools
 

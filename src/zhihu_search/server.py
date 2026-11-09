@@ -117,7 +117,19 @@ OPTIONAL_MCP_TOOL_NAMES = (
     | OFFICE_MCP_TOOL_NAMES
     | ACCOUNT_MCP_TOOL_NAMES
 )
+SYNC_MCP_TOOL_NAMES = frozenset(
+    {
+        "sync_save",
+        "sync_list",
+        "sync_get",
+        "sync_prepare",
+        "sync_preview",
+        "sync_publish",
+        "sync_upload_image",
+    }
+)
 ALL_MCP_TOOL_NAMES = CORE_MCP_TOOL_NAMES | OPTIONAL_MCP_TOOL_NAMES
+KNOWN_MCP_TOOL_NAMES = ALL_MCP_TOOL_NAMES | SYNC_MCP_TOOL_NAMES
 MCP_TOOL_PROFILES = {
     "compact": CORE_MCP_TOOL_NAMES,
     "knowledge": CORE_MCP_TOOL_NAMES | KNOWLEDGE_MCP_TOOL_NAMES,
@@ -126,6 +138,7 @@ MCP_TOOL_PROFILES = {
     "creator": CORE_MCP_TOOL_NAMES | CREATOR_MCP_TOOL_NAMES,
     "office": CORE_MCP_TOOL_NAMES | OFFICE_MCP_TOOL_NAMES,
     "full": ALL_MCP_TOOL_NAMES,
+    "sync": CORE_MCP_TOOL_NAMES | SYNC_MCP_TOOL_NAMES,
 }
 _session_expandable_tool_names = OPTIONAL_MCP_TOOL_NAMES
 
@@ -162,7 +175,7 @@ def _parse_mcp_tool_selection(value: str) -> tuple[frozenset[str], bool]:
         if profile is not None:
             names |= profile
             uses_profile = True
-        elif part in ALL_MCP_TOOL_NAMES:
+        elif part in KNOWN_MCP_TOOL_NAMES:
             names.add(part)
         else:
             unknown.add(part)
@@ -171,7 +184,7 @@ def _parse_mcp_tool_selection(value: str) -> tuple[frozenset[str], bool]:
         raise ValueError(
             f"未知 MCP 工具或档位：{', '.join(sorted(unknown))}；"
             f"可用档位：{', '.join(sorted(MCP_TOOL_PROFILES))}；"
-            f"可用工具：{', '.join(sorted(ALL_MCP_TOOL_NAMES))}"
+            f"可用工具：{', '.join(sorted(KNOWN_MCP_TOOL_NAMES))}"
         )
     return frozenset(names), uses_profile
 
@@ -1042,6 +1055,9 @@ async def other(
 
 # Keep direct ``zhihu_search.server:mcp`` imports aligned with the documented
 # default. ``main`` applies the explicit CLI/environment selection afterward.
+from .sync.mcp import register as _register_sync_tools
+
+_register_sync_tools(mcp)
 configure_mcp_tools("compact")
 
 
