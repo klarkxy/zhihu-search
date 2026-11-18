@@ -96,18 +96,28 @@ Shared fields: `title`, `summary`, `assumptions`, `conclusions`, `conflicts`,
 - `recent` also needs `window_days` (must match the packet), `changes`, `timeline`,
   and `next_checks`.
 
-A confirmed timeline item needs `uncertain: false`, `event_date` as `YYYY-MM-DD`,
-and `event_date_basis`. `excerpt` means that exact date appears in a cited title or
-excerpt. `assumption` means `assumption_id` points at an assumption. Uncertain items
-keep `event_date`, `event_date_basis`, and `assumption_id` null. They are rendered
-outside the confirmed timeline. The same `merge_key` cannot carry two different dates.
-Publication time from the packet is displayed beside the event and is not copied into
-`event_date`.
+A confirmed timeline item needs `uncertain: false`, `event_date` as a real
+`YYYY-MM-DD`, and `event_date_basis: "excerpt"`. The date must appear in a cited
+title or excerpt as an event, not only as a publication or update time. An
+assumption cannot be confirmed. An uncertain item may keep a date when
+`event_date_basis` is `assumption` and that assumption states the date; it is
+labeled unconfirmed and stays outside the confirmed timeline. An uncertain item
+with no date leaves `event_date`, `event_date_basis`, and `assumption_id` null.
+The same `merge_key` cannot carry two different dates. Publication time from the
+packet is displayed beside the event and is not copied into `event_date`.
+
+`dates.timezone` must be `Asia/Shanghai`. `window_start_unix` must equal
+`clock_unix - window_days * 86400`, and `window_end_unix` must equal `clock_unix`.
+Rendering uses that fixed clock and does not read the time of export. Shanghai
+calendar days are compared against those bounds.
 
 Interactive input:
 
 - `value` has exactly one provenance: `evidence_id` or `value_assumption_id`.
-- With `evidence_id`, the number must appear in that item's title or excerpt.
+- With `evidence_id`, `value_quote` is a continuous excerpt in which the number and
+  unit occur in the same sentence. A number in one sentence and the unit in the next
+  is rejected. The rendered page shows that quote. This is not a semantic check that
+  the sentence is about the claimed quantity.
 - `bounds_assumption_id` explains the slider range.
 - Formula expressions may use input ids and `+ - * / ( )` only. Numeric literals
   are rejected, so a constant such as a room height has to be its own sourced input.

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from .research import SCHEMA as EVIDENCE_SCHEMA
+from .research import WINDOW_MAX, WINDOW_MIN
 
 
 REPORT_SCHEMA = "zhihu-search.report.v1"
@@ -130,7 +131,12 @@ def render_report(evidence: Any, report: Any) -> dict[str, Any]:
 
 
 def write_report(evidence: Any, report: Any, out_dir: str | Path) -> dict[str, Any]:
-    """Render, then export three new files without following links or leaving a partial set."""
+    """Render, then export three new files without following links or leaving a partial set.
+
+    A symlink in a parent directory is part of the path the caller named, so it is
+    opened normally. The output directory itself and ``report.md``, ``report.json``,
+    and ``report.html`` must not be symlinks and must not already exist.
+    """
     rendered = render_report(evidence, report)
     target = Path(out_dir)
     if target.is_symlink():
@@ -375,9 +381,10 @@ def _recent(
     assumptions: list[dict[str, str]],
 ) -> dict[str, Any]:
     window = value.get("window_days")
-    expected = packet.get("dates", {}).get("window_days")
+    expected = packet.get("dates", {}).get("window_days") if isinstance(packet.get("dates"), dict) else None
     if window != expected:
         check.add(f"window_days 必须与证据包一致（{expected}）。")
+    _canonical_window(packet, check)
     changes = _changes(value.get("changes"), check, known, cited)
     checks = _string_list(value.get("next_checks"), "next_checks", check, limit=8)
     events = _events(value.get("timeline"), check, known, assumption_ids, cited, packet, assumptions)
@@ -707,15 +714,50 @@ def _shanghai_day(unix: int) -> date:
     return datetime.fromtimestamp(unix, _SHANGHAI).date()
 
 
+def _canonical_window(packet: dict[str, Any], check: _Check) -> tuple[int, int] | None:
+    """Return the retrieval window only when every stored bound matches it.
+
+    The window is ``clock_unix - window_days * 86400`` through ``clock_unix``.
+    Rendering does not read the current time, and a wider ``window_start_unix``
+    or a rewritten ``window_end_unix`` is rejected.
+    """
+    dates = packet.get("dates") if isinstance(packet.get("dates"), dict) else None
+    if not isinstance(dates, dict):
+        check.add("证据包缺少 dates，不能核对事件日期窗口。")
+        return None
+    if dates.get("timezone") != "Asia/Shanghai":
+        check.add("证据包时区必须是 Asia/Shanghai。")
+        return None
+    days = dates.get("window_days")
+    clock = dates.get("clock_unix")
+    start = dates.get("window_start_unix")
+    end = dates.get("window_end_unix")
+    if type(days) is not int or not WINDOW_MIN <= days <= WINDOW_MAX:
+        check.add(f"window_days 必须是 {WINDOW_MIN}-{WINDOW_MAX} 的整数。")
+        return None
+    if type(clock) is not int or type(start) is not int or type(end) is not int:
+        check.add("clock_unix、window_start_unix、window_end_unix 必须都是整数。")
+        return None
+    expected_start = clock - days * 86400
+    if start != expected_start:
+        check.add(
+            f"window_start_unix 必须等于 clock_unix - window_days * 86400（{expected_start}）。"
+            "不能单独把窗口改宽。"
+        )
+        return None
+    if end != clock:
+        check.add("window_end_unix 必须等于 clock_unix。渲染不另取导出时的当前时间。")
+        return None
+    return expected_start, clock
+
+
 def _date_allowed(day: date, packet: dict[str, Any], path: str, check: _Check) -> bool:
-    dates = packet.get("dates") if isinstance(packet.get("dates"), dict) else {}
-    clock = dates.get("clock_unix") if isinstance(dates, dict) else None
-    start = dates.get("window_start_unix") if isinstance(dates, dict) else None
-    if type(clock) is not int or type(start) is not int:
-        check.add(f"{path} 缺少证据包里的上海窗口时钟，不能确认或假设事件日期。")
+    window = _canonical_window(packet, check)
+    if window is None:
         return False
-    end_day = _shanghai_day(clock)
-    start_day = _shanghai_day(start)
+    start_unix, end_unix = window
+    start_day = _shanghai_day(start_unix)
+    end_day = _shanghai_day(end_unix)
     if day > end_day:
         check.add(f"{path} 的日期晚于本次检索时钟的上海日期。")
         return False
@@ -1279,16 +1321,23 @@ def _markdown(data: dict[str, Any]) -> str:
         lines.extend(["## 可核对的计算", "", interactive["title"], ""])
         lines.append("下面是默认输入下的静态结果。拖动计算在 HTML 文件里，并且只使用这些输入。")
         lines.append("")
+        known_assumptions = _assumption_map(data)
         for item in interactive["inputs"]:
-            source = (
-                f"证据 {item['evidence_id']}"
-                if item["evidence_id"]
-                else f"假设 {item['value_assumption_id']}"
-            )
+            if item["evidence_id"]:
+                source = f"证据 {item['evidence_id']} 的原文「{item.get('value_quote') or ''}」"
+            else:
+                source = _named_assumption(known_assumptions, item["value_assumption_id"])
+            bounds = _named_assumption(known_assumptions, item["bounds_assumption_id"])
             lines.append(
                 f"- {item['label']}：{item['value']} {item['unit']}；当前值来自{source}；"
-                f"滑块范围来自假设 {item['bounds_assumption_id']}。"
+                f"滑块范围来自{bounds}。"
             )
+        for formula in interactive["formulas"]:
+            names = "；".join(
+                _named_assumption(known_assumptions, ident)
+                for ident in formula.get("assumption_ids") or []
+            )
+            lines.append(f"- 公式 {formula['label']}（{formula['expression']}）的假设：{names}")
         for item in interactive.get("default_results") or []:
             lines.append(f"- {item['label']} = {item['display']} {item['unit']}")
         lines.append("")
@@ -1376,6 +1425,12 @@ def _html(data: dict[str, Any]) -> str:
         f"<p><strong>问题</strong> {_esc(data['question'])}</p>",
         f"<section><h2>摘要</h2><p>{_esc(data['summary'])}</p></section>",
     ]
+    if data.get("assumptions"):
+        blocks = [
+            f"<h3>{_esc(item['id'])}</h3><p>{_esc(item['text'])}</p>"
+            for item in data["assumptions"]
+        ]
+        parts.extend(_html_articles("假设", blocks))
     parts.extend(_html_sections(data))
     parts.extend(["<section><h2>来源</h2>"])
     for item in data["cited_evidence"]:
@@ -1500,9 +1555,16 @@ def _html_sections(data: dict[str, Any]) -> list[str]:
     interactive = sections.get("interactive")
     if interactive:
         parts.append(f"<section><h2>{_esc(interactive['title'])}</h2>")
-        parts.append("<p>滑块范围是假设。当前值要么能在证据摘录中找到，要么另有假设编号。</p>")
+        parts.append("<p>滑块范围来自下面写出的假设。证据数值则显示被引用的原文。</p>")
+        known_assumptions = _assumption_map(data)
         for item in interactive["inputs"]:
-            source = item["evidence_id"] or item["value_assumption_id"]
+            if item["evidence_id"]:
+                provenance = (
+                    f"证据 {_esc(item['evidence_id'])} 的原文「{_esc(item.get('value_quote') or '')}」"
+                )
+            else:
+                provenance = _esc(_named_assumption(known_assumptions, item["value_assumption_id"]))
+            bounds = _esc(_named_assumption(known_assumptions, item["bounds_assumption_id"]))
             parts.append(
                 "<label>"
                 f"<span>{_esc(item['label'])}（{_esc(item['unit'])}）</span>"
@@ -1511,18 +1573,21 @@ def _html_sections(data: dict[str, Any]) -> list[str]:
                 f"step=\"{_esc(item['step'])}\" value=\"{_esc(item['value'])}\">"
                 f"<strong data-value=\"{_esc(item['id'])}\">{_esc(item['value'])}</strong>"
                 "</label>"
-                f"<p class=\"source\">当前值来源 {_esc(source)}；"
-                f"出处 {_esc(item.get('value_quote') or '假设正文')}；"
-                f"范围假设 {_esc(item['bounds_assumption_id'])}</p>"
+                f"<p class=\"source\">当前值来自{provenance}。滑块范围来自{bounds}。</p>"
             )
         for formula in interactive["formulas"]:
             display = format_number(formula["default_result"]) if isinstance(formula["default_result"], float) else "无法计算"
+            names = "；".join(
+                _named_assumption(known_assumptions, ident)
+                for ident in formula.get("assumption_ids") or []
+            )
             parts.append(
                 "<p class=\"result\">"
                 f"<span>{_esc(formula['label'])}</span> "
                 f"<output id=\"out-{_esc(formula['id'])}\">{_esc(display)}</output> "
                 f"{_esc(formula['unit'])}"
                 "</p>"
+                f"<p class=\"source\">公式 {_esc(formula.get('expression') or '')} 的假设：{_esc(names)}</p>"
             )
         parts.append("</section>")
     return parts
@@ -1562,6 +1627,23 @@ def _script(interactive: dict[str, Any]) -> str:
         "renderCalc();\n"
         "</script>"
     )
+
+
+def _assumption_map(data: dict[str, Any]) -> dict[str, str]:
+    return {
+        item["id"]: item["text"]
+        for item in data.get("assumptions") or []
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+
+
+def _named_assumption(assumptions: dict[str, str], ident: str | None) -> str:
+    if not ident:
+        return "没有对应假设"
+    text = assumptions.get(ident)
+    if not text:
+        return ident
+    return f"假设 {ident}：{text}"
 
 
 def _html_articles(title: str, blocks: list[str], lead: str = "") -> list[str]:
@@ -1731,8 +1813,9 @@ def _quantity_in_evidence(
 
 
 def _quantity_in_text(number: float, unit: str, text: str, path: str, check: _Check) -> None:
-    if not _number_in_text(number, text) or not unit or unit not in text:
-        check.add(f"{path} 的数值和单位必须出现在同一段出处里，孤立数字不能当成这个量。")
+    clauses = [part for part in re.split(r"[。！？!?\n]+", text) if part.strip()]
+    if not any(_number_in_text(number, part) and unit and unit in part for part in clauses):
+        check.add(f"{path} 的数值和单位必须出现在同一句出处里，不能分属前后两句。")
 
 
 def _haystack(item: dict[str, Any]) -> str:

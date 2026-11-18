@@ -470,7 +470,7 @@ def test_render_rejects_unsourced_numbers_population_claims_and_empty_packets(tm
     packet = _packet([_item()])
     report = _deep_report()
     report["interactive"]["inputs"][0]["value"] = 500
-    with pytest.raises(ReportRejected, match="同一段出处"):
+    with pytest.raises(ReportRejected, match="同一句"):
         render_report(packet, report)
     report = _deep_report()
     report["summary"] = "全体用户都应该买这台机器。"
@@ -686,6 +686,7 @@ def _recent_packet(excerpt: str, **time):
             "window_days": 30,
             "clock_unix": RECENT_CLOCK,
             "window_start_unix": RECENT_START,
+            "window_end_unix": RECENT_CLOCK,
             "timezone": "Asia/Shanghai",
         },
     )
@@ -756,7 +757,7 @@ def test_unrelated_numeral_is_not_a_quantity():
     report = _deep_report()
     report["interactive"]["inputs"][0]["value"] = 12
     report["interactive"]["inputs"][0]["value_quote"] = "脚注编号12"
-    with pytest.raises(ReportRejected, match="同一段出处"):
+    with pytest.raises(ReportRejected, match="同一句"):
         render_report(_packet([item]), report)
 
 
@@ -850,6 +851,60 @@ def test_html_exports_conflicts_disputes_and_comparisons():
     html = render_report(_packet([_item(), second]), report)["html"]
     for heading in ("适用场景", "规格与体验", "机制", "并列争议", "证据冲突", "卧室试算", "标称和体验不能互相替代"):
         assert heading in html
+
+
+def test_window_bounds_must_match_clock_arithmetic():
+    january = _recent_packet("2026-01-15 公布了试验数据。")
+    january["dates"]["window_start_unix"] = RECENT_CLOCK - 400 * 86400
+    with pytest.raises(ReportRejected, match="window_start_unix"):
+        render_report(january, _recent_report("2026-01-15"))
+    narrowed = _recent_packet("2026-11-10 公布了试验数据。")
+    narrowed["dates"]["window_end_unix"] = narrowed["dates"]["window_start_unix"]
+    with pytest.raises(ReportRejected, match="window_end_unix"):
+        render_report(narrowed, _recent_report("2026-11-10"))
+
+
+def test_html_renders_assumption_text_not_placeholders():
+    rendered = render_report(_packet([_item()]), _deep_report())
+    for text in (
+        "层高按 2.4 米估计",
+        "按 5 次/小时换气估计",
+        "适用面积按 CADR 除以换气次数再除以层高估计",
+        "滑块范围只用于本地试算",
+        "CADR 400 m3/h",
+    ):
+        assert text in rendered["markdown"]
+        assert text in rendered["html"]
+    assert "出处 假设正文" not in rendered["html"]
+    hostile = _deep_report()
+    hostile["assumptions"][1]["text"] = "层高按 2.4 米估计<script>alert(1)</script>"
+    html = render_report(_packet([_item()]), hostile)["html"]
+    assert "<script>alert" not in html
+    assert "层高按 2.4 米估计" in html
+    assert "&lt;script&gt;" in html
+
+
+def test_quantity_quote_cannot_cross_sentences():
+    item = _item(excerpt="脚注编号12。后一句才写单位m3/h。")
+    report = _deep_report()
+    report["interactive"]["inputs"][0]["value"] = 12
+    report["interactive"]["inputs"][0]["min"] = 1
+    report["interactive"]["inputs"][0]["value_quote"] = "脚注编号12。后一句才写单位m3/h"
+    with pytest.raises(ReportRejected, match="同一句"):
+        render_report(_packet([item]), report)
+
+
+def test_parent_symlink_is_the_caller_chosen_directory(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    parent = tmp_path / "via-link"
+    parent.symlink_to(real, target_is_directory=True)
+    rendered = write_report(_packet([_item()]), _deep_report(), parent / "out")
+    html = real / "out" / "report.html"
+    assert html.is_file()
+    assert not html.is_symlink()
+    assert "层高按 2.4 米估计" in html.read_text(encoding="utf-8")
+    assert rendered["directory"].endswith("/out")
 
 
 def test_export_refuses_symlink_and_leaves_no_partial_files(tmp_path):
