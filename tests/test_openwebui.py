@@ -41,6 +41,8 @@ def test_openapi_exposes_every_model_safe_new_operation() -> None:
     """New user/task operations share the same bearer-protected router."""
     schema = _client().get("/openapi.json").json()
     expected = {
+        "/research": "research",
+        "/research/render": "research_render",
         "/quota": "quota",
         "/user/contents": "user_contents",
         "/user/followees": "user_followees",

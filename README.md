@@ -88,7 +88,7 @@ args:    zhihu-search serve --tools compact
 | `creator` | compact 加全文、评论和 2 个创作统计工具 |
 | `office` | compact 加 2 个 PDF 和 2 个 PPT 工具 |
 | `sync` | compact 加 7 个同步工具：保存/读取草稿、校验、预览、确认后发布、上传图片 |
-| `full` | 22 个业务/账号工具加 `other`，共 23 个。不含 `sync` |
+| `full` | 22 个上游业务/账号工具、2 个本地研究工具，加 `other`，共 25 个。不含 `sync` |
 
 档位和工具名可以用逗号组合，例如 `knowledge,user` 或
 `compact,knowledge_search`。只写工具名时是严格 allowlist，例如
@@ -96,8 +96,8 @@ args:    zhihu-search serve --tools compact
 `--tools` 的优先级更高。
 
 `other` 的 `enable`、`disable`、`reset` 只影响当前 MCP 会话。使用档位时，
-它能管理全部 19 个低频工具；使用纯工具名 allowlist 时，它不能越过启动时的
-允许范围。`sync` 不在这 19 个里面，`other` 不会把它展开。
+它能管理全部 21 个低频工具；使用纯工具名 allowlist 时，它不能越过启动时的
+允许范围。`sync` 不在这 21 个里面，`other` 不会把它展开。
 
 客户端配置：
 
@@ -122,6 +122,8 @@ uvx zhihu-search search "RAG 评测方法" --count 5
 uvx zhihu-search ask "什么是 ReAct Agent？" --model thinking
 uvx zhihu-search trending --limit 10
 uvx zhihu-search quota --api-id knowledge
+uvx zhihu-search research recent "减肥药近期进展" --window-days 30 --format json
+uvx zhihu-search research-render evidence.json synthesis.json --out ./research-out
 ```
 
 低频能力同样可以直接调用：
@@ -205,6 +207,12 @@ uvx zhihu-search openwebui \
 | PDF 解析 | 3 | 上传、创建任务、查询状态 |
 | PPT 生成 | 2 | 创建任务、查询状态 |
 | OAuth 辅助 | 2 | 授权 URL、授权码换 token |
+| 研究检索与本地报告 | 0 | 组合已有搜索；校验宿主结果后写本地 Markdown、JSON 和单文件 HTML |
+
+研究不是新的知乎接口。`research` 只返回带引用、时间和预算的证据包；
+`research-render` 校验宿主写出的结构，再生成本地文件。数字要能在摘录里找到，
+或标明假设。不确定日期不会写进确认时间线。结果不会发布。细节见
+[API 覆盖与边界](docs/API_COVERAGE.md)。
 
 逐端点说明、官方文档差异和安全边界见
 [API 覆盖与边界](docs/API_COVERAGE.md)。

@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from . import credentials
+from . import credentials, research
 from .upstream.base import McpError
 from .upstream.http_client import ApiResult, ZhihuRestClient
 
@@ -133,6 +133,52 @@ async def run_search(
         )
 
     return await _run_command(call, client)
+
+
+async def run_research(
+    *,
+    workflow: str,
+    question: str,
+    angles: list[str] | None = None,
+    sources: list[str] | None = None,
+    count: int = 5,
+    max_calls: int | None = None,
+    window_days: int | None = None,
+    hosts: list[str] | None = None,
+    follow_questions: bool | None = None,
+    knowledge_base_ids: list[str] | None = None,
+    recall_scopes: list[str] | None = None,
+    as_of: int | None = None,
+    client: ZhihuRestClient | None = None,
+) -> CommandResult:
+    """Retrieve a bounded evidence packet. This does not synthesize or render a report."""
+    try:
+        plan = research.prepare(
+            workflow=workflow,
+            question=question,
+            angles=angles,
+            sources=sources,
+            count=count,
+            max_calls=max_calls,
+            window_days=window_days,
+            hosts=hosts,
+            follow_questions=follow_questions,
+            knowledge_base_ids=knowledge_base_ids,
+            recall_scopes=recall_scopes,
+            as_of=as_of,
+        )
+    except McpError as exc:
+        return CommandResult(success=False, error=str(exc))
+    own, owns = _make_client(client)
+    try:
+        data = await research.execute(plan, own)
+        return CommandResult(success=True, data=data)
+    except McpError as exc:
+        return CommandResult(success=False, error=str(exc))
+    except Exception as exc:
+        return CommandResult(success=False, error=f"未预期错误：{exc}")
+    finally:
+        await _try_close(own, owns)
 
 
 async def run_ask(

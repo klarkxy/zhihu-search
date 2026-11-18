@@ -31,7 +31,7 @@ codex mcp get zhihu
 `zhihu-search serve --tools compact`。新建任务后工具才会进入新目录。
 
 `compact` 是默认档位；知识库选 `knowledge`，用户数据选 `user`，问题发现选
-`questions`，创作能力选 `creator`，PDF/PPT 选 `office`，全部 23 个 MCP
+`questions`，创作能力选 `creator`，PDF/PPT 选 `office`，全部 25 个 MCP
 工具选 `full`。确认后发布到知乎用 `sync`，它不会进入 `compact`，`other`
 也不会展开它。详细语义见
 [MCP 高频集成](README.md#2-mcp高频集成)。不要在 MCP 配置中添加知乎凭证。

@@ -213,6 +213,53 @@ async def test_unpriced_but_mapped_capabilities_work_only_with_verified_free_quo
 
 
 @pytest.mark.asyncio
+async def test_research_recent_uses_realtime_filter_under_the_same_policy(tmp_path):
+    seen = []
+
+    async def handle(request):
+        seen.append((request.url.path, dict(request.url.params)))
+        if request.url.path == "/api/v1/quota":
+            group = request.url.params.get("APIIDs", "global_search")
+            return httpx.Response(200, json={"Code": 0, "Data": [{"APIID": group, "RemainingQuota": 5}]})
+        return httpx.Response(200, json={"Code": 0, "Data": {"Items": [], "HasMore": False}})
+
+    async with httpx.AsyncClient(base_url=BASE_URL, transport=httpx.MockTransport(handle)) as network:
+        client = ZhihuRestClient(
+            "mock-access-secret",
+            client=network,
+            call_policy=CallPolicy(directory=tmp_path, daily_call_limit=1),
+        )
+        result = await commands.run_research(
+            workflow="recent",
+            question="减肥药近期进展",
+            sources=["web"],
+            hosts=["example.com"],
+            max_calls=1,
+            window_days=30,
+            as_of=1700000000,
+            follow_questions=False,
+            client=client,
+        )
+        blocked = await commands.run_research(
+            workflow="recent",
+            question="减肥药再次检索",
+            sources=["web"],
+            max_calls=1,
+            as_of=1700000000,
+            follow_questions=False,
+            client=client,
+        )
+    assert result.success and result.data["calls"][0]["status"] == "ok"
+    assert seen[0][0] == "/api/v1/quota"
+    assert seen[1][0] == "/api/v1/content/global_search"
+    assert seen[1][1]["SearchDB"] == "realtime"
+    assert seen[1][1]["Filter"] == 'host=="example.com" AND publish_time>=1697408000'
+    assert blocked.success and blocked.data["calls"][0]["status"] == "error"
+    assert blocked.data["budget"]["stop_reason"] == "call_policy"
+    assert [path for path, _ in seen].count("/api/v1/content/global_search") == 1
+
+
+@pytest.mark.asyncio
 async def test_unchanged_official_remaining_cannot_be_reused_by_our_clients(tmp_path):
     async def quota(group): return remaining(group, 1)
     async def execute(): return "ok"

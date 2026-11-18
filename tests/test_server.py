@@ -281,6 +281,7 @@ def test_capability_groups_partition_the_optional_tools() -> None:
         server.KNOWLEDGE_MCP_TOOL_NAMES,
         server.OFFICE_MCP_TOOL_NAMES,
         server.ACCOUNT_MCP_TOOL_NAMES,
+        server.RESEARCH_MCP_TOOL_NAMES,
     )
     assert set().union(*groups) == server.OPTIONAL_MCP_TOOL_NAMES
     assert sum(len(group) for group in groups) == len(server.OPTIONAL_MCP_TOOL_NAMES)
