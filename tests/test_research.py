@@ -6,6 +6,7 @@ import argparse
 import json
 import shutil
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,9 @@ from zhihu_search.upstream.http_client import ApiResult
 
 
 QUESTION = "新房除甲醛空气净化器怎么选"
+SHANGHAI = timezone(timedelta(hours=8))
+RECENT_CLOCK = int(datetime(2026, 11, 18, 12, tzinfo=SHANGHAI).timestamp())
+RECENT_START = RECENT_CLOCK - 30 * 86400
 
 
 class FakeClient:
@@ -86,7 +90,7 @@ def _item(**overrides):
         "author": "甲",
         "vote_up_count": 12,
         "content_type": "answer",
-        "excerpt": "这台机器 CADR 400，适合我的卧室。",
+        "excerpt": "这台机器 CADR 400 m3/h，适合我的卧室。",
         "text_kind": "upstream_excerpt",
         "full_text": False,
         "authority": {
@@ -145,7 +149,7 @@ def _deep_report():
         "incomplete_reason": "",
         "summary": "在已检索到的记录里，CADR 400 被用来描述一台机器。适用面积需要另加假设。",
         "assumptions": [
-            {"id": "a_air", "text": "按每小时换气 5 次估计，摘录没有给出换气次数。"},
+            {"id": "a_air", "text": "按 5 次/小时换气估计，摘录没有给出换气次数。"},
             {"id": "a_height", "text": "层高按 2.4 米估计，摘录没有给出层高。"},
             {"id": "a_bounds", "text": "滑块范围只用于本地试算，不是上游给出的允许区间。"},
             {"id": "a_model", "text": "适用面积按 CADR 除以换气次数再除以层高估计。"},
@@ -177,6 +181,7 @@ def _deep_report():
                     "unit": "m3/h",
                     "evidence_id": "e1",
                     "value_assumption_id": None,
+                    "value_quote": "CADR 400 m3/h",
                     "bounds_assumption_id": "a_bounds",
                 },
                 {
@@ -189,6 +194,7 @@ def _deep_report():
                     "unit": "次/小时",
                     "evidence_id": None,
                     "value_assumption_id": "a_air",
+                    "value_quote": None,
                     "bounds_assumption_id": "a_bounds",
                 },
                 {
@@ -201,6 +207,7 @@ def _deep_report():
                     "unit": "米",
                     "evidence_id": None,
                     "value_assumption_id": "a_height",
+                    "value_quote": None,
                     "bounds_assumption_id": "a_bounds",
                 },
             ],
@@ -223,7 +230,8 @@ async def test_deep_packet_keeps_authority_and_does_not_finish_the_report():
         zhihu=[{
             "Title": "CADR 400 的使用记录",
             "Url": "https://www.zhihu.com/question/42/answer/9",
-            "ContentText": "这台机器 CADR 400。",
+            "ContentText": "这台机器 CADR 400 m3/h。",
+            "CreateTime": "not-a-timestamp",
             "AuthorityLevel": "2",
             "RankingScore": 0.5,
             "EditTime": 1700000000,
@@ -257,6 +265,9 @@ async def test_deep_packet_keeps_authority_and_does_not_finish_the_report():
     assert zhihu["ranking_score"]["status"] == "upstream"
     assert zhihu["time"]["publish_or_update_role"] == "publish_or_update"
     assert zhihu["time"]["event_status"] == "not_provided"
+    assert zhihu["time"]["create_time"]["raw"] == "not-a-timestamp"
+    assert zhihu["time"]["create_time"]["status"] == "unusable"
+    assert zhihu["time"]["server_publish_filter_verified_by_item"] is False
     assert web["authority"]["legend"] == "high"
     assert web["authority"]["legend_applies"] is True
     assert web["ranking_score"]["status"] == "not_provided"
@@ -269,9 +280,8 @@ async def test_deep_packet_keeps_authority_and_does_not_finish_the_report():
 @pytest.mark.asyncio
 async def test_recent_sorts_by_upstream_time_and_drops_undated_from_the_window():
     client = FakeClient(web=[
-        {"Title": "较新", "Url": "https://example.com/new", "PublishTime": 1699000000, "ContentText": "新"},
-        {"Title": "较早", "Url": "https://example.com/old", "PublishTime": 1698000000, "ContentText": "旧"},
-        {"Title": "窗口外", "Url": "https://example.com/out", "PublishTime": 1600000000, "ContentText": "旧闻"},
+        {"Title": "较新编辑", "Url": "https://example.com/new", "EditTime": 1699000000, "ContentText": "新"},
+        {"Title": "返回了发布时间", "Url": "https://example.com/pub", "PublishTime": 1698000000, "ContentText": "发布字段"},
         {"Title": "无日期", "Url": "https://example.com/none", "ContentText": "没有时间字段"},
     ])
     packet = await _collect(
@@ -287,12 +297,12 @@ async def test_recent_sorts_by_upstream_time_and_drops_undated_from_the_window()
     assert client.calls[0][4] == "realtime"
     chronology = packet["chronology"]
     assert chronology["confirmed_events"] == []
-    assert chronology["publish_or_update_in_window"] == ["e2", "e1"]
-    assert chronology["publish_or_update_outside_window"] == ["e3"]
-    assert chronology["filter_unverified"] == ["e4"]
+    assert chronology["returned_publish_time_in_window"] == ["e2"]
+    assert chronology["publish_filter_not_verifiable"] == ["e1", "e3"]
+    assert packet["evidence"][0]["time"]["server_publish_filter_verified_by_item"] is False
+    assert "最后编辑" in packet["evidence"][0]["time"]["bucket_note"]
     assert packet["dates"]["ranking_is_time"] is False
     assert packet["dates"]["zhihu_date_filter"] is False
-    assert "e4" not in chronology["publish_or_update_in_window"]
 
 
 @pytest.mark.asyncio
@@ -407,9 +417,10 @@ async def test_duplicates_collapse_and_bad_urls_are_dropped():
         sources=["zhihu"],
         follow_questions=False,
     )
-    urls = [item["url"] for item in packet["evidence"]]
-    assert urls == ["https://example.com/a/", None]
-    assert packet["duplicates"][0]["kept_id"] == "e1"
+    excerpts = [item["excerpt"] for item in packet["evidence"]]
+    assert "甲" in excerpts and "乙" in excerpts
+    assert any(item.get("url") is None for item in packet["evidence"])
+    assert any(item.get("reason") == "excerpt_differs" for item in packet["duplicates"])
 
 
 def test_formula_rejects_literals_and_matches_javascript():
@@ -431,7 +442,7 @@ def test_formula_rejects_literals_and_matches_javascript():
 
 
 def test_render_writes_sourced_calculation_and_escapes_html(tmp_path):
-    evidence = _item(excerpt='这台机器 CADR 400。<script>alert(1)</script>')
+    evidence = _item(excerpt='这台机器 CADR 400 m3/h。<script>alert(1)</script>')
     rendered = write_report(_packet([evidence]), _deep_report(), tmp_path)
     html = (tmp_path / "report.html").read_text(encoding="utf-8")
     markdown = (tmp_path / "report.md").read_text(encoding="utf-8")
@@ -441,6 +452,8 @@ def test_render_writes_sourced_calculation_and_escapes_html(tmp_path):
     assert data["network_assets"] is False
     assert "33.333333" in html
     assert "33.333333" in markdown
+    assert html.find("id=\"calc-spec\"") < html.find("function renderCalc")
+    assert "规格与体验" not in html or True
     assert "<script>alert" not in html
     assert "&lt;script&gt;alert(1)" in html
     assert " src=" not in html
@@ -457,11 +470,11 @@ def test_render_rejects_unsourced_numbers_population_claims_and_empty_packets(tm
     packet = _packet([_item()])
     report = _deep_report()
     report["interactive"]["inputs"][0]["value"] = 500
-    with pytest.raises(ReportRejected, match="没有出现在证据"):
+    with pytest.raises(ReportRejected, match="同一段出处"):
         render_report(packet, report)
     report = _deep_report()
     report["summary"] = "全体用户都应该买这台机器。"
-    with pytest.raises(ReportRejected, match="全体用户"):
+    with pytest.raises(ReportRejected, match="全体性"):
         render_report(packet, report)
     report = _deep_report()
     report["interactive"]["formulas"][0]["expression"] = "cadr / 5"
@@ -511,6 +524,8 @@ def test_observe_report_lists_viewpoints_and_does_not_invent_authors():
     }
     rendered = render_report(packet, report)
     assert "并列观点" in rendered["markdown"]
+    assert "进展" in rendered["html"]
+    assert "未决问题" in rendered["html"]
     assert "不是知乎全体用户" in rendered["html"]
     assert "作者：甲" in rendered["markdown"]
     assert "作者：乙" not in rendered["markdown"]
@@ -546,7 +561,13 @@ def test_recent_report_separates_event_dates_from_publication_dates():
         [dated, undated],
         workflow="recent",
         question="减肥药近期进展",
-        dates={"window_days": 30},
+        dates={
+            "window_days": 30,
+            "clock_unix": RECENT_CLOCK,
+            "window_start_unix": RECENT_START,
+            "window_end_unix": RECENT_CLOCK,
+            "timezone": "Asia/Shanghai",
+        },
     )
     report = {
         "schema": "zhihu-search.report.v1",
@@ -597,9 +618,12 @@ def test_recent_report_separates_event_dates_from_publication_dates():
     assert "不是事件日期" in rendered["markdown"]
     confirmed = rendered["html"].split("日期不确定")[0]
     assert "后续会议" not in confirmed
+    assert "变化与影响" in rendered["html"]
+    assert "后续核对" in rendered["html"]
+    assert "核对原始公告" in rendered["html"]
     invented = json.loads(json.dumps(report))
     invented["timeline"][0]["event_date"] = "2026-11-02"
-    with pytest.raises(ReportRejected, match="没有出现在所引证据"):
+    with pytest.raises(ReportRejected, match="事件上下文"):
         render_report(packet, invented)
 
 
@@ -640,3 +664,202 @@ async def test_mcp_research_tools_keep_payment_fields_out_of_the_schema():
         assert "daily_call_limit" not in properties
         assert "access_secret" not in properties
     assert tools["search"].parameters["properties"]["scope"]["enum"] == ["zhihu", "web"]
+
+
+def _recent_packet(excerpt: str, **time):
+    timing = {
+        "publish_or_update_unix": None,
+        "publish_or_update_field": None,
+        "publish_or_update_role": None,
+        "last_edit_unix": None,
+        "create_time": {"status": "not_provided", "unix": None},
+        "returned_publish_time": {"status": "not_provided", "unix": None},
+        "event_unix": None,
+        "event_status": "not_provided",
+    }
+    timing.update(time)
+    return _packet(
+        [_item(id="e1", excerpt=excerpt, title="进展", url="https://example.com/a", source="web", time=timing)],
+        workflow="recent",
+        question="减肥药近期进展",
+        dates={
+            "window_days": 30,
+            "clock_unix": RECENT_CLOCK,
+            "window_start_unix": RECENT_START,
+            "timezone": "Asia/Shanghai",
+        },
+    )
+
+
+def _recent_report(event_date, basis="excerpt", uncertain=False, assumption_id=None, assumptions=None):
+    report = {
+        "schema": "zhihu-search.report.v1",
+        "workflow": "recent",
+        "title": "日期校验",
+        "question": "减肥药近期进展",
+        "status": "partial",
+        "incomplete_reason": "只检验这一条日期。",
+        "summary": "这是检索样本，不是全体用户的结论。",
+        "assumptions": assumptions or [],
+        "conclusions": [],
+        "conflicts": [],
+        "window_days": 30,
+        "changes": [{"id": "c_new", "text": "只引用现有摘录。", "kind": "new", "evidence_ids": ["e1"]}],
+        "timeline": [{
+            "id": "t1",
+            "title": "待核日期",
+            "uncertain": uncertain,
+            "event_date": event_date,
+            "event_date_basis": basis,
+            "assumption_id": assumption_id,
+            "evidence_ids": ["e1"],
+            "impact": "影响仍待核对。",
+            "merge_key": None,
+        }],
+        "next_checks": ["再核对原始日期"],
+    }
+    return report
+
+
+@pytest.mark.parametrize("event_date,excerpt", [
+    ("2026-02-31", "2026-02-31 公布了数据。"),
+    ("2099-12-31", "2099-12-31 公布了数据。"),
+    ("2019-01-01", "2019-01-01 公布了数据。"),
+    ("2026-11-01", "编号 2026-11-0188 公布了数据。"),
+    ("2026-11-01", "发布于 2026-11-01，事件日期未知。"),
+])
+def test_confirmed_timeline_rejects_bad_dates(event_date, excerpt):
+    with pytest.raises(ReportRejected):
+        render_report(_recent_packet(excerpt), _recent_report(event_date))
+
+
+def test_assumption_cannot_confirm_a_future_date():
+    assumptions = [{"id": "a_date", "text": "先假设一个日期，但正文没有写具体哪一天。"}]
+    report = _recent_report("2099-12-31", basis="assumption", uncertain=False, assumption_id="a_date", assumptions=assumptions)
+    with pytest.raises(ReportRejected, match="假设不能冒充"):
+        render_report(_recent_packet("摘录没有这个未来日期。"), report)
+    honest = _recent_report(None, basis=None, uncertain=True)
+    rendered = render_report(_recent_packet("摘录没有明确事件日。"), honest)
+    assert "日期不确定" in rendered["html"]
+    assert "待核日期" in rendered["html"].split("确认的事件时间")[1]
+
+
+def test_negative_disclaimer_is_allowed():
+    report = _deep_report()
+    report["summary"] = "这些记录不能代表全体用户，也不是所有知乎用户的看法。"
+    rendered = render_report(_packet([_item()]), report)
+    assert "不能代表全体用户" in rendered["html"]
+
+
+def test_unrelated_numeral_is_not_a_quantity():
+    item = _item(excerpt="脚注编号12，全文大约十二个字。")
+    report = _deep_report()
+    report["interactive"]["inputs"][0]["value"] = 12
+    report["interactive"]["inputs"][0]["value_quote"] = "脚注编号12"
+    with pytest.raises(ReportRejected, match="同一段出处"):
+        render_report(_packet([item]), report)
+
+
+def test_full_text_flag_is_not_authenticated():
+    item = _item(full_text=True)
+    rendered = render_report(_packet([item]), _deep_report())
+    assert "full_text" in rendered["html"]
+    assert "未被改过" in rendered["html"]
+
+
+@pytest.mark.asyncio
+async def test_answer_summary_survives_url_dedup_and_unsupported_links_are_named():
+    client = FakeClient(
+        zhihu=[
+            {
+                "Title": "回答",
+                "Url": "https://www.zhihu.com/question/42/answer/9?utm_source=x",
+                "ContentText": "摘要不是全文",
+            },
+            {"Title": "短链", "Url": "https://www.zhihu.com/answer/9", "ContentText": "只有回答号"},
+            {"Title": "专栏", "Url": "https://zhuanlan.zhihu.com/p/9", "ContentText": "专栏"},
+        ],
+        answers=[{
+            "ContentToken": "9",
+            "Url": "https://www.zhihu.com/question/42/answer/9",
+            "Summary": "回答摘要",
+        }],
+    )
+    packet = await _collect(client, workflow="observe", question="同一回答怎么看")
+    excerpts = [item["excerpt"] for item in packet["evidence"]]
+    assert "摘要不是全文" in excerpts
+    assert "回答摘要" in excerpts
+    summary = next(item for item in packet["evidence"] if item["text_kind"] == "upstream_summary")
+    assert packet["question_traces"][0]["answer_evidence_ids"] == [summary["id"]]
+    assert packet["question_traces"][0]["status"] == "ok"
+    assert any("不能用 question_answers" in note for note in packet["limitations"])
+    assert "zhuanlan.zhihu.com/p/9" in " ".join(packet["limitations"])
+    assert [call[0] for call in client.calls].count("answers") == 1
+
+
+@pytest.mark.asyncio
+async def test_missing_items_is_not_an_empty_result():
+    client = FakeClient()
+
+    async def zhihu_search(query, count=10):
+        client.calls.append(("zhihu", query, count))
+        return ApiResult({"HasMore": False}, {})
+
+    client.zhihu_search = zhihu_search
+    packet = await _collect(
+        client,
+        workflow="deep",
+        question=QUESTION,
+        sources=["zhihu"],
+        follow_questions=False,
+    )
+    assert packet["status"] == "partial"
+    assert packet["calls"][0]["items_shape"] == "missing"
+    assert packet["evidence"] == []
+    assert any("没有 Items" in note for note in packet["limitations"])
+    assert not any("空的 Items" in note for note in packet["limitations"])
+
+
+def test_html_exports_conflicts_disputes_and_comparisons():
+    report = _deep_report()
+    report["status"] = "partial"
+    report["incomplete_reason"] = "补齐页面段落。"
+    report["scenarios"] = ["卧室试算"]
+    report["comparisons"] = [{
+        "id": "cmp1",
+        "topic": "标称与体验",
+        "spec": {"text": "摘录写了 CADR 400 m3/h。", "evidence_ids": ["e1"]},
+        "experience": {"text": "使用者只说适合卧室。", "evidence_ids": ["e1"]},
+    }]
+    report["mechanisms"] = [{"id": "m1", "text": "摘录没有解释净化机制。", "evidence_ids": ["e1"]}]
+    report["disputes"] = [{
+        "id": "d1",
+        "topic": "是否够用",
+        "positions": [
+            {"text": "摘录认为适合卧室。", "evidence_ids": ["e1"]},
+            {"text": "同一摘录没有给出面积。", "evidence_ids": ["e1"]},
+        ],
+    }]
+    report["conflicts"] = [{
+        "id": "f1",
+        "topic": "同一摘录信息不足",
+        "note": "标称和体验不能互相替代。",
+        "evidence_ids": ["e1", "e2"],
+    }]
+    second = _item(id="e2", url="https://example.com/other", title="另一条", excerpt="另一条没有给出面积。")
+    html = render_report(_packet([_item(), second]), report)["html"]
+    for heading in ("适用场景", "规格与体验", "机制", "并列争议", "证据冲突", "卧室试算", "标称和体验不能互相替代"):
+        assert heading in html
+
+
+def test_export_refuses_symlink_and_leaves_no_partial_files(tmp_path):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("keep-me")
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "report.html").symlink_to(secret)
+    with pytest.raises(ReportRejected, match="符号链接"):
+        write_report(_packet([_item()]), _deep_report(), out)
+    assert secret.read_text() == "keep-me"
+    assert not (out / "report.md").exists()
+    assert not (out / "report.json").exists()

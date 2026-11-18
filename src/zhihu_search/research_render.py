@@ -17,7 +17,10 @@ from __future__ import annotations
 import html
 import json
 import math
+import os
 import re
+import uuid
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +31,15 @@ REPORT_SCHEMA = "zhihu-search.report.v1"
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _IDENT = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 _EVIDENCE_ID = re.compile(r"^e[1-9][0-9]{0,3}$")
-_POPULATION = ("全体用户", "所有知乎用户", "所有用户都", "知乎用户都认为")
+_UNIVERSAL = ("全体用户", "所有用户", "所有知乎用户", "知乎用户都", "全部用户", "人人都认为")
+_NEGATION = ("不是", "并非", "不能", "不要", "并不", "不算", "而非", "没有", "非")
+_EVENT_CUES = ("公布", "发生", "召开", "获批", "上市", "宣布", "试验", "发布会", "事件日期", "事件发生")
+_PUBLISH_CUES = ("发布于", "发表于", "更新于", "编辑于", "发布时间", "发布日期", "最后编辑", "更新日期")
+_UNKNOWN_CUES = ("未知", "不确定", "不明", "不详", "未提供", "无法确定")
+_SHANGHAI = timezone(timedelta(hours=8))
+_MAX_INPUT_BYTES = 1_500_000
+_MAX_OUTPUT_BYTES = 2_000_000
+_EXPORT_NAMES = ("report.md", "report.json", "report.html")
 _COMMON_KEYS = {
     "schema",
     "workflow",
@@ -102,6 +113,12 @@ class _Check:
 
 def render_report(evidence: Any, report: Any) -> dict[str, Any]:
     """Return markdown, html and normalized data, or reject the synthesis."""
+    try:
+        raw = json.dumps({"evidence": evidence, "report": report}, ensure_ascii=False, default=str)
+    except (TypeError, ValueError) as exc:
+        raise ReportRejected([f"提交内容不能序列化：{exc}"]) from exc
+    if len(raw.encode("utf-8")) > _MAX_INPUT_BYTES:
+        raise ReportRejected([f"提交内容超过 {_MAX_INPUT_BYTES} 字节，拒绝渲染。"])
     check = _Check()
     packet = _packet(evidence, check)
     body = _report(report, packet, check)
@@ -113,20 +130,57 @@ def render_report(evidence: Any, report: Any) -> dict[str, Any]:
 
 
 def write_report(evidence: Any, report: Any, out_dir: str | Path) -> dict[str, Any]:
-    """Render and write report.md, report.json and report.html."""
+    """Render, then export three new files without following links or leaving a partial set."""
     rendered = render_report(evidence, report)
     target = Path(out_dir)
+    if target.is_symlink():
+        raise ReportRejected(["输出目录是符号链接，拒绝写入。"])
     if target.exists() and not target.is_dir():
         raise ReportRejected(["输出路径已存在并且不是目录。"])
     target.mkdir(parents=True, exist_ok=True)
-    (target / "report.md").write_text(rendered["markdown"], encoding="utf-8")
-    (target / "report.json").write_text(
-        json.dumps(rendered["data"], ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    (target / "report.html").write_text(rendered["html"], encoding="utf-8")
+    if target.is_symlink() or not target.is_dir():
+        raise ReportRejected(["输出目录不可用。"])
+    payloads = {
+        "report.md": rendered["markdown"],
+        "report.json": json.dumps(rendered["data"], ensure_ascii=False, indent=2) + "\n",
+        "report.html": rendered["html"],
+    }
+    for name in _EXPORT_NAMES:
+        path = target / name
+        if path.is_symlink() or path.exists():
+            raise ReportRejected([f"拒绝覆盖已有文件或符号链接：{name}"])
+        encoded = payloads[name].encode("utf-8")
+        if len(encoded) > _MAX_OUTPUT_BYTES:
+            raise ReportRejected([f"{name} 超过 {_MAX_OUTPUT_BYTES} 字节，拒绝导出。"])
+    created: list[Path] = []
+    temps: list[Path] = []
+    try:
+        for name in _EXPORT_NAMES:
+            final = target / name
+            temporary = target / f".{name}.{uuid.uuid4().hex}.tmp"
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            fd = os.open(temporary, flags, 0o644)
+            temps.append(temporary)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payloads[name])
+                handle.flush()
+                os.fsync(handle.fileno())
+            if final.is_symlink() or final.exists():
+                raise ReportRejected([f"导出时发现已有文件或符号链接：{name}"])
+            os.replace(temporary, final)
+            temps.remove(temporary)
+            created.append(final)
+    except Exception:
+        for path in temps:
+            path.unlink(missing_ok=True)
+        for path in created:
+            if not path.is_symlink():
+                path.unlink(missing_ok=True)
+        raise
     rendered["directory"] = str(target)
-    rendered["files"] = ["report.md", "report.json", "report.html"]
+    rendered["files"] = list(_EXPORT_NAMES)
     return rendered
 
 
@@ -219,11 +273,11 @@ def _report(value: Any, packet: dict[str, Any], check: _Check) -> dict[str, Any]
 
     specific: dict[str, Any] = {}
     if workflow == "deep":
-        specific = _deep(value, check, known, assumption_ids, cited)
+        specific = _deep(value, check, known, assumption_ids, cited, assumptions)
     elif workflow == "observe":
         specific = _observe(value, check, known, cited)
     else:
-        specific = _recent(value, packet, check, known, assumption_ids, cited)
+        specific = _recent(value, packet, check, known, assumption_ids, cited, assumptions)
 
     if status == "complete" and cited != set(known):
         missed = sorted(set(known) - cited)
@@ -251,6 +305,7 @@ def _deep(
     known: dict[str, dict[str, Any]],
     assumption_ids: set[str],
     cited: set[str],
+    assumptions: list[dict[str, str]],
 ) -> dict[str, Any]:
     scenarios = _string_list(value.get("scenarios"), "scenarios", check, limit=8)
     comparisons = _comparisons(value.get("comparisons"), check, known, cited)
@@ -261,6 +316,7 @@ def _deep(
         check,
         known,
         assumption_ids,
+        assumptions,
     )
     if interactive:
         for item in interactive["inputs"]:
@@ -316,6 +372,7 @@ def _recent(
     known: dict[str, dict[str, Any]],
     assumption_ids: set[str],
     cited: set[str],
+    assumptions: list[dict[str, str]],
 ) -> dict[str, Any]:
     window = value.get("window_days")
     expected = packet.get("dates", {}).get("window_days")
@@ -323,7 +380,7 @@ def _recent(
         check.add(f"window_days 必须与证据包一致（{expected}）。")
     changes = _changes(value.get("changes"), check, known, cited)
     checks = _string_list(value.get("next_checks"), "next_checks", check, limit=8)
-    events = _events(value.get("timeline"), check, known, assumption_ids, cited)
+    events = _events(value.get("timeline"), check, known, assumption_ids, cited, packet, assumptions)
     if value.get("status") == "complete" and not changes:
         check.add("近况速览的 complete 报告至少要有一条变化或影响。")
     if value.get("status") == "complete" and not checks:
@@ -560,6 +617,8 @@ def _events(
     known: dict[str, dict[str, Any]],
     assumption_ids: set[str],
     cited: set[str],
+    packet: dict[str, Any],
+    assumptions: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
     items = _list(value, "timeline", check, limit=30)
     keys = {
@@ -592,39 +651,150 @@ def _events(
         if merge_key is not None and (not isinstance(merge_key, str) or not _IDENT.fullmatch(merge_key)):
             check.add(f"{path}.merge_key 不合法。")
             merge_key = None
+        calendar = _calendar_date(event_date) if isinstance(event_date, str) else None
         if uncertain:
-            if event_date is not None or basis is not None or assumption_id is not None:
-                check.add(f"{path} 日期不确定时，事件日期、依据和假设都必须为空。")
-        else:
-            if not isinstance(event_date, str) or not _DATE.fullmatch(event_date):
-                check.add(f"{path}.event_date 必须是 YYYY-MM-DD。")
-                event_date = None
-            if basis not in {"excerpt", "assumption"}:
-                check.add(f"{path}.event_date_basis 必须是 excerpt 或 assumption。")
-            if basis == "excerpt":
-                if assumption_id is not None:
-                    check.add(f"{path} 用正文作为日期依据时不能再挂假设。")
-                if isinstance(event_date, str) and not any(
-                    event_date in _haystack(known[item_id]) for item_id in evidence_ids if item_id in known
+            if basis not in {None, "assumption"} or (basis == "assumption" and assumption_id not in assumption_ids):
+                check.add(f"{path} 不确定日期只能不写依据，或指向一条写明该日期的假设。")
+            if event_date is not None or basis == "assumption":
+                if calendar is None:
+                    check.add(f"{path}.event_date 不是真实日历日期。")
+                elif not _date_allowed(calendar, packet, path, check):
+                    pass
+                elif basis == "assumption" and not _date_in_text(
+                    event_date,
+                    next((item["text"] for item in assumptions if item["id"] == assumption_id), ""),
                 ):
-                    check.add(f"{path} 的事件日期没有出现在所引证据的标题或摘录中。")
-            elif basis == "assumption":
-                if assumption_id not in assumption_ids:
-                    check.add(f"{path}.assumption_id 没有对应假设。")
+                    check.add(f"{path} 的假设正文没有写明这个日期，不能用假设代替确认。")
+            elif basis is not None or assumption_id is not None:
+                check.add(f"{path} 没有事件日期时，依据和假设必须为空。")
+        else:
+            if basis != "excerpt":
+                check.add(f"{path} 确认时间线只接受摘录中的事件日期，假设不能冒充已确认。")
+            if assumption_id is not None:
+                check.add(f"{path} 确认的事件日期不能再挂假设。")
+            if calendar is None:
+                check.add(f"{path}.event_date 不是真实日历日期。")
+            elif isinstance(event_date, str):
+                _date_allowed(calendar, packet, path, check)
+                _event_date_in_evidence(event_date, evidence_ids, known, path, check)
         result.append(
             {
                 "id": _ident(item.get("id"), f"{path}.id", check),
                 "title": _text(item.get("title"), f"{path}.title", check, limit=200),
                 "uncertain": uncertain,
-                "event_date": event_date if not uncertain else None,
-                "event_date_basis": basis if not uncertain else None,
-                "assumption_id": assumption_id if not uncertain else None,
+                "event_date": event_date if calendar else None,
+                "event_date_basis": None if uncertain and basis != "assumption" else basis,
+                "assumption_id": assumption_id if basis == "assumption" else None,
                 "evidence_ids": evidence_ids,
                 "impact": _text(item.get("impact"), f"{path}.impact", check, limit=1000),
                 "merge_key": merge_key,
             }
         )
     return result
+
+
+def _calendar_date(value: Any) -> date | None:
+    if not isinstance(value, str) or not _DATE.fullmatch(value):
+        return None
+    year, month, day = (int(part) for part in value.split("-"))
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def _shanghai_day(unix: int) -> date:
+    return datetime.fromtimestamp(unix, _SHANGHAI).date()
+
+
+def _date_allowed(day: date, packet: dict[str, Any], path: str, check: _Check) -> bool:
+    dates = packet.get("dates") if isinstance(packet.get("dates"), dict) else {}
+    clock = dates.get("clock_unix") if isinstance(dates, dict) else None
+    start = dates.get("window_start_unix") if isinstance(dates, dict) else None
+    if type(clock) is not int or type(start) is not int:
+        check.add(f"{path} 缺少证据包里的上海窗口时钟，不能确认或假设事件日期。")
+        return False
+    end_day = _shanghai_day(clock)
+    start_day = _shanghai_day(start)
+    if day > end_day:
+        check.add(f"{path} 的日期晚于本次检索时钟的上海日期。")
+        return False
+    if day < start_day:
+        check.add(f"{path} 的日期早于证据窗口的上海起始日。")
+        return False
+    return True
+
+
+def _date_in_text(date_text: str, text: str) -> bool:
+    return re.search(rf"(?<!\d){re.escape(date_text)}(?!\d)", text) is not None
+
+
+def _event_date_in_evidence(
+    date_text: str,
+    evidence_ids: list[str],
+    known: dict[str, dict[str, Any]],
+    path: str,
+    check: _Check,
+) -> bool:
+    found = False
+    for evidence_id in evidence_ids:
+        item = known.get(evidence_id) or {}
+        text = _haystack(item)
+        if not _date_in_text(date_text, text):
+            continue
+        for span in _date_spans(text, date_text):
+            if _unknown_event(span):
+                check.add(f"{path} 的上下文写明事件日期不确定，不能放进确认时间线。")
+                return False
+            if _publish_only(span):
+                continue
+            if _event_context(span):
+                found = True
+            elif _matches_publish_day(date_text, item):
+                check.add(f"{path} 这个日期只对应发布或更新时间，没有独立的事件表述。")
+                return False
+    if not found:
+        check.add(f"{path} 的事件日期没有作为独立日期出现在摘录的事件上下文中。")
+    return found
+
+
+def _date_spans(text: str, date_text: str) -> list[str]:
+    spans = []
+    for match in re.finditer(rf"(?<!\d){re.escape(date_text)}(?!\d)", text):
+        spans.append(text[max(0, match.start() - 24) : match.end() + 24])
+    return spans
+
+
+def _event_context(span: str) -> bool:
+    return any(cue in span for cue in _EVENT_CUES)
+
+
+def _publish_only(span: str) -> bool:
+    return any(cue in span for cue in _PUBLISH_CUES) and not _event_context(span)
+
+
+def _unknown_event(span: str) -> bool:
+    return any(cue in span for cue in _UNKNOWN_CUES) and any(
+        word in span for word in ("事件", "发生", "日期", "时间")
+    )
+
+
+def _matches_publish_day(date_text: str, item: dict[str, Any]) -> bool:
+    timing = item.get("time") if isinstance(item.get("time"), dict) else {}
+    candidates = [
+        timing.get("publish_or_update_unix"),
+        timing.get("last_edit_unix"),
+        (timing.get("returned_publish_time") or {}).get("unix")
+        if isinstance(timing.get("returned_publish_time"), dict)
+        else None,
+        (timing.get("create_time") or {}).get("unix")
+        if isinstance(timing.get("create_time"), dict)
+        else None,
+    ]
+    for unix in candidates:
+        if type(unix) is int and _shanghai_day(unix).isoformat() == date_text:
+            return True
+    return False
 
 
 def _merge_events(
@@ -664,6 +834,7 @@ def _interactive(
     check: _Check,
     known: dict[str, dict[str, Any]],
     assumption_ids: set[str],
+    assumptions: list[dict[str, str]],
 ) -> dict[str, Any] | None:
     if value is None:
         return None
@@ -688,6 +859,7 @@ def _interactive(
         "unit",
         "evidence_id",
         "value_assumption_id",
+        "value_quote",
         "bounds_assumption_id",
     }
     for index, item in enumerate(inputs):
@@ -708,16 +880,27 @@ def _interactive(
                 check.add(f"{path} 的范围、步长和当前值不成立。")
         evidence_id = item.get("evidence_id")
         assumption_id = item.get("value_assumption_id")
+        quote = item.get("value_quote")
         bounds_id = item.get("bounds_assumption_id")
+        unit = _text(item.get("unit"), f"{path}.unit", check, limit=40)
         if (evidence_id is None) == (assumption_id is None):
             check.add(f"{path} 的当前值必须正好有一个来源：证据或假设。")
         if evidence_id is not None:
+            if quote is not None and not isinstance(quote, str):
+                check.add(f"{path}.value_quote 必须是字符串。")
+                quote = None
             if evidence_id not in known:
                 check.add(f"{path}.evidence_id 不在证据包中。")
-            elif number is not None and not _number_in_text(number, _haystack(known[evidence_id])):
-                check.add(f"{path}.value 没有出现在证据 {evidence_id} 的标题或摘录中。")
-        if assumption_id is not None and assumption_id not in assumption_ids:
-            check.add(f"{path}.value_assumption_id 没有对应假设。")
+            elif number is not None:
+                _quantity_in_evidence(number, unit, quote, known[evidence_id], path, check)
+        else:
+            quote = None
+        if assumption_id is not None:
+            assumption_text = next((entry["text"] for entry in assumptions if entry["id"] == assumption_id), "")
+            if assumption_id not in assumption_ids:
+                check.add(f"{path}.value_assumption_id 没有对应假设。")
+            elif number is not None:
+                _quantity_in_text(number, unit, assumption_text, path, check)
         if bounds_id not in assumption_ids:
             check.add(f"{path}.bounds_assumption_id 必须指向解释滑块范围的假设。")
         if number is not None:
@@ -730,9 +913,10 @@ def _interactive(
                 "min": low,
                 "max": high,
                 "step": step,
-                "unit": _text(item.get("unit"), f"{path}.unit", check, limit=40),
+                "unit": unit,
                 "evidence_id": evidence_id,
                 "value_assumption_id": assumption_id,
+                "value_quote": quote if evidence_id is not None else None,
                 "bounds_assumption_id": bounds_id,
             }
         )
@@ -969,8 +1153,11 @@ def _render_limitations(packet: dict[str, Any], body: dict[str, Any]) -> list[st
     notes = [
         "本地报告不会发布到知乎。",
         "页面不加载外部资源，也不执行来源正文里的脚本。",
+        "证据包由调用方提交，渲染器不重新请求知乎，也不验证它未被改过。",
         packet["sample"]["note"],
     ]
+    if any(item.get("full_text") is True for item in packet.get("evidence") or []):
+        notes.append("有条目把 full_text 标成 true。检索只会写入 false；这不能当成已核对的上游全文。")
     if body["workflow"] == "observe" and body.get("single_viewpoint"):
         notes.append("目前结构化结果里只有一种说法，不能并列成多个解释。")
     if body["workflow"] == "recent":
@@ -1079,7 +1266,10 @@ def _markdown(data: dict[str, Any]) -> str:
         if not sections["uncertain_dates"]:
             lines.append("没有单独标出的不确定日期。")
         for item in sections["uncertain_dates"]:
-            lines.append(f"- {item['title']}：{item['impact']}（{_join(item['evidence_ids'])}）")
+            label = item["title"]
+            if item.get("event_date"):
+                label = f"{item['event_date']}（假设，未确认）{label}"
+            lines.append(f"- {label}：{item['impact']}（{_join(item['evidence_ids'])}）")
             lines.extend(_publish_lines(item["evidence_ids"], data["cited_evidence"]))
         lines.extend(["", "## 后续核对", ""])
         lines.extend(f"- {item}" for item in sections["next_checks"])
@@ -1229,22 +1419,61 @@ def _html_sections(data: dict[str, Any]) -> list[str]:
     sections = data["sections"]
     parts: list[str] = []
     if data["conclusions"]:
-        parts.append("<section><h2>有条件的结论</h2>")
-        for item in data["conclusions"]:
-            parts.append(
-                "<article>"
-                f"<h3>{_esc(item['id'])}</h3>"
-                f"<p>条件：{_esc(item['condition'])}</p>"
-                f"<p>{_esc(item['text'])}</p>"
-                f"<p>证据 {_esc(_join(item['evidence_ids']))}</p>"
-                "</article>"
+        parts.extend(_html_articles("有条件的结论", [
+            f"<h3>{_esc(item['id'])}</h3><p>条件：{_esc(item['condition'])}</p>"
+            f"<p>{_esc(item['text'])}</p><p>证据 {_esc(_join(item['evidence_ids']))}</p>"
+            for item in data["conclusions"]
+        ]))
+    if sections.get("scenarios"):
+        parts.extend(_html_list("适用场景", [f"<li>{_esc(item)}</li>" for item in sections["scenarios"]]))
+    if sections.get("comparisons"):
+        parts.extend(_html_articles("规格与体验", [
+            f"<h3>{_esc(item['topic'])}</h3>"
+            f"<p>规格：{_esc(item['spec']['text'])}（{_esc(_join(item['spec']['evidence_ids']))}）</p>"
+            f"<p>体验：{_esc(item['experience']['text'])}（{_esc(_join(item['experience']['evidence_ids']))}）</p>"
+            for item in sections["comparisons"]
+        ]))
+    if sections.get("mechanisms"):
+        parts.extend(_html_articles("机制", [
+            f"<p>{_esc(item['text'])}</p><p>证据 {_esc(_join(item['evidence_ids']))}</p>"
+            for item in sections["mechanisms"]
+        ]))
+    if sections.get("disputes"):
+        blocks = []
+        for item in sections["disputes"]:
+            positions = "".join(
+                f"<li>{_esc(position['text'])}（{_esc(_join(position['evidence_ids']))}）</li>"
+                for position in item["positions"]
             )
-        parts.append("</section>")
+            blocks.append(f"<h3>{_esc(item['topic'])}</h3><ul>{positions}</ul>")
+        parts.extend(_html_articles("并列争议", blocks))
+    if data.get("conflicts"):
+        parts.extend(_html_articles("证据冲突", [
+            f"<h3>{_esc(item['topic'])}</h3><p>{_esc(item['note'])}</p>"
+            f"<p>证据 {_esc(_join(item['evidence_ids']))}</p>"
+            for item in data["conflicts"]
+        ]))
     if sections.get("viewpoints"):
-        parts.append("<section><h2>并列观点</h2><p>只覆盖本次检索样本。</p>")
-        for item in sections["viewpoints"]:
-            parts.append(f"<article><p>{_esc(item['text'])}</p><p>证据 {_esc(_join(item['evidence_ids']))}</p></article>")
-        parts.append("</section>")
+        parts.extend(_html_articles("并列观点", [
+            f"<p>{_esc(item['text'])}</p><p>证据 {_esc(_join(item['evidence_ids']))}</p>"
+            for item in sections["viewpoints"]
+        ], lead="只覆盖本次检索样本。"))
+    if sections.get("progress"):
+        parts.extend(_html_articles("进展", [
+            f"<p>{_esc(item['text'])}</p><p>证据 {_esc(_join(item['evidence_ids']))}</p>"
+            for item in sections["progress"]
+        ]))
+    if sections.get("open_questions"):
+        parts.extend(_html_articles("未决问题", [
+            f"<p>{_esc(item['text'])}</p><p>证据 {_esc(_join(item['evidence_ids']))}</p>"
+            for item in sections["open_questions"]
+        ]))
+    if sections.get("changes"):
+        parts.extend(_html_articles("变化与影响", [
+            f"<p>{'新信息' if item['kind'] == 'new' else '影响'}：{_esc(item['text'])}</p>"
+            f"<p>证据 {_esc(_join(item['evidence_ids']))}</p>"
+            for item in sections["changes"]
+        ]))
     if "confirmed_timeline" in sections:
         parts.append("<section><h2>确认的事件时间</h2>")
         if not sections["confirmed_timeline"]:
@@ -1261,8 +1490,13 @@ def _html_sections(data: dict[str, Any]) -> list[str]:
         if not sections["uncertain_dates"]:
             parts.append("<p>没有单独标出的不确定日期。</p>")
         for item in sections["uncertain_dates"]:
-            parts.append(f"<article><h3>{_esc(item['title'])}</h3><p>{_esc(item['impact'])}</p></article>")
+            heading = _esc(item["title"])
+            if item.get("event_date"):
+                heading = f"{_esc(item['event_date'])}（假设，未确认）{heading}"
+            parts.append(f"<article><h3>{heading}</h3><p>{_esc(item['impact'])}</p></article>")
         parts.append("</section>")
+    if sections.get("next_checks"):
+        parts.extend(_html_list("后续核对", [f"<li>{_esc(item)}</li>" for item in sections["next_checks"]]))
     interactive = sections.get("interactive")
     if interactive:
         parts.append(f"<section><h2>{_esc(interactive['title'])}</h2>")
@@ -1277,7 +1511,9 @@ def _html_sections(data: dict[str, Any]) -> list[str]:
                 f"step=\"{_esc(item['step'])}\" value=\"{_esc(item['value'])}\">"
                 f"<strong data-value=\"{_esc(item['id'])}\">{_esc(item['value'])}</strong>"
                 "</label>"
-                f"<p class=\"source\">当前值来源 {_esc(source)}；范围假设 {_esc(item['bounds_assumption_id'])}</p>"
+                f"<p class=\"source\">当前值来源 {_esc(source)}；"
+                f"出处 {_esc(item.get('value_quote') or '假设正文')}；"
+                f"范围假设 {_esc(item['bounds_assumption_id'])}</p>"
             )
         for formula in interactive["formulas"]:
             display = format_number(formula["default_result"]) if isinstance(formula["default_result"], float) else "无法计算"
@@ -1301,10 +1537,13 @@ def _script(interactive: dict[str, Any]) -> str:
     }
     payload = json.dumps(spec, ensure_ascii=False).replace("<", "\\u003c")
     return (
+        f"<script id=\"calc-spec\" type=\"application/json\">{payload}</script>\n"
         "<script>\n"
         + INTERPRETER_JS
-        + "\nfunction renderCalc() {\n"
-        "  var spec = JSON.parse(document.getElementById('calc-spec').textContent);\n"
+        +         "\nfunction renderCalc() {\n"
+        "  var specNode = document.getElementById('calc-spec');\n"
+        "  if (!specNode) return;\n"
+        "  var spec = JSON.parse(specNode.textContent);\n"
         "  var env = {};\n"
         "  var controls = document.querySelectorAll('[data-input]');\n"
         "  for (var i = 0; i < controls.length; i++) {\n"
@@ -1321,9 +1560,25 @@ def _script(interactive: dict[str, Any]) -> str:
         "var controls = document.querySelectorAll('[data-input]');\n"
         "for (var i = 0; i < controls.length; i++) controls[i].addEventListener('input', renderCalc);\n"
         "renderCalc();\n"
-        "</script>\n"
-        f"<script id=\"calc-spec\" type=\"application/json\">{payload}</script>"
+        "</script>"
     )
+
+
+def _html_articles(title: str, blocks: list[str], lead: str = "") -> list[str]:
+    if not blocks:
+        return []
+    parts = [f"<section><h2>{_esc(title)}</h2>"]
+    if lead:
+        parts.append(f"<p>{_esc(lead)}</p>")
+    parts.extend(f"<article>{block}</article>" for block in blocks)
+    parts.append("</section>")
+    return parts
+
+
+def _html_list(title: str, items: list[str]) -> list[str]:
+    if not items:
+        return []
+    return [f"<section><h2>{_esc(title)}</h2><ul>", *items, "</ul></section>"]
 
 
 _CSS = """
@@ -1362,11 +1617,23 @@ def _text(value: Any, path: str, check: _Check, *, limit: int, required: bool = 
         check.add(f"{path} 不能为空。")
     if len(value) > limit:
         check.add(f"{path} 超过 {limit} 个字符。")
-    for phrase in _POPULATION:
-        if phrase in value:
-            check.add(f"{path} 不能把检索样本写成全体用户观点。")
-            break
+    if _affirmative_universal(value):
+        check.add(f"{path} 把样本写成了没有否定的全体性结论。")
     return stripped
+
+
+def _affirmative_universal(text: str) -> bool:
+    for phrase in _UNIVERSAL:
+        start = 0
+        while True:
+            index = text.find(phrase, start)
+            if index < 0:
+                break
+            window = text[max(0, index - 8) : index]
+            if not any(negation in window for negation in _NEGATION):
+                return True
+            start = index + len(phrase)
+    return False
 
 
 def _list(value: Any, path: str, check: _Check, *, limit: int) -> list[Any]:
@@ -1444,6 +1711,28 @@ def _number_in_text(number: float, text: str) -> bool:
     else:
         token = format(number, "g")
     return re.search(rf"(?<![\d.]){re.escape(token)}(?![\d.])", text) is not None
+
+
+def _quantity_in_evidence(
+    number: float,
+    unit: str,
+    quote: Any,
+    item: dict[str, Any],
+    path: str,
+    check: _Check,
+) -> None:
+    if not isinstance(quote, str) or not quote.strip():
+        check.add(f"{path}.value_quote 必须是包含数值和单位的原文片段。")
+        return
+    if quote not in _haystack(item):
+        check.add(f"{path}.value_quote 不是该证据标题或摘录里的连续原文。")
+        return
+    _quantity_in_text(number, unit, quote, path, check)
+
+
+def _quantity_in_text(number: float, unit: str, text: str, path: str, check: _Check) -> None:
+    if not _number_in_text(number, text) or not unit or unit not in text:
+        check.add(f"{path} 的数值和单位必须出现在同一段出处里，孤立数字不能当成这个量。")
 
 
 def _haystack(item: dict[str, Any]) -> str:

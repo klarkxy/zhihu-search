@@ -105,7 +105,7 @@ allowlist 下只能管理其中已允许的名称，无法展开列表外工具�
 公开依据：
 
 - [Zhihu CLI 文档](https://developer.zhihu.com/docs?key=zhihu_cli)
-- [全网搜索](https://developer.zhihu.com/api/v1/content/global_search)：`SearchDB` 为 `all`、`realtime` 或 `static`；`Filter` 支持 `host` 与 `publish_time`；最多 20 条；`HasMore` 没有请求用的 cursor；`AuthorityLevel` 字符串 `1` 低、`2` 中、`3` 高、`4` 很高只记载在全网搜索
+- [全网搜索](https://developer.zhihu.com/api/v1/content/global_search)：`SearchDB` 为 `all`、`realtime` 或 `static`；`Filter` 的官方示例是 `host=="example.com" AND publish_time>=1778494631`（操作符两侧不加空格，站点加双引号，时间戳不加引号，`AND`/`OR` 大写）；最多 20 条；`HasMore` 没有请求用的 cursor；返回的 `EditTime` 是最后编辑时间，不是 `publish_time` 过滤证明；`AuthorityLevel` 字符串 `1` 低、`2` 中、`3` 高、`4` 很高只记载在全网搜索
 - [知乎搜索](https://developer.zhihu.com/api/v1/content/zhihu_search)：最多 10 条；会返回 `AuthorityLevel`，但该页没有 1-4 图例，本仓库不套用；`EditTime` 是发布或更新时间
 - 产品介绍文章：<https://zhuanlan.zhihu.com/p/2103916806142259391>
 
@@ -133,6 +133,8 @@ uv run pytest tests/test_research.py tests/test_call_policy.py
 
 这些测试使用 mock。研究检索的额度预检和每日上限断言在 `test_call_policy.py`，
 因为其他测试文件会短路调用保护。它们不读取本机 Access Secret，也不请求知乎。
+仓库里的 GitHub workflow 只在打 tag 或手动触发时跑测试。开放 PR 上 0 个检查
+不表示 CI 已通过，只表示没有挂检查。上面的 pytest 是本地结果。
 
 ## 知乎同步发布
 

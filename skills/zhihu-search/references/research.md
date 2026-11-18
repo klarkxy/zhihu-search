@@ -50,12 +50,24 @@ Default sources:
 | `observe` | Zhihu | Follows up to two question URLs unless `--no-follow-questions` |
 | `recent` | Zhihu and web | Web uses `SearchDB=realtime` and `publish_time>=<unix>` |
 
-`--host` adds `host=="..."` to the web filter. `zhihu.com` is rejected. Recent's
+`--host` adds the official filter form `host=="example.com"`. Combined with the
+recent window it is `host=="example.com" AND publish_time>=<unix>`. `zhihu.com` is rejected. Recent's
 window defaults to 30 rolling periods of 86400 seconds ending at the process clock,
 or at `--as-of`. The clock is shown as `Asia/Shanghai`. Zhihu search has no date
-parameter, so undated Zhihu hits stay in `undated`. Web hits that lack a time field
-stay in `filter_unverified` even though the request was filtered. `confirmed_events`
-in the packet is always empty: event dates are a host decision.
+parameter, so a local `EditTime` comparison is not a server `publish_time` filter.
+Web `EditTime` is the last edit. If the response has no returned `publish_time`
+field, the bucket is `publish_filter_not_verifiable`. `CreateTime` is kept raw when
+present. `confirmed_events` in the packet is always empty.
+
+A confirmed report date must be a real calendar day inside the packet's Shanghai
+window, not after the packet clock, and the excerpt must use it as an event.
+`2026-02-31`, a future day, a day outside the window, or `2026-11-0188` containing
+`2026-11-01` are rejected. A publication or update date, or an assumption, cannot
+enter the confirmed timeline. Uncertain items stay outside it.
+
+`/answer/{id}` and `zhuanlan.zhihu.com/p/{id}` are not followed. `question_answers`
+only accepts `https://www.zhihu.com/question/{id}`. A later answer summary is kept
+even when its canonical URL matches an earlier search hit with a different excerpt.
 
 `AuthorityLevel` is copied as returned. The labels low / medium / high / very high
 are applied only when the source is web and the value is the string `1`, `2`, `3`,

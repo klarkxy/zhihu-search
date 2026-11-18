@@ -10,16 +10,17 @@ installed version's exact arguments.
 ```bash
 uvx zhihu-search search "RAG 评测 方法" --scope zhihu --count 10
 uvx zhihu-search search "RAG evaluation benchmark" --scope web --count 20 --search-db realtime
-uvx zhihu-search search "向量数据库 选型" --scope web --count 10 --filter "host != example.com"
+uvx zhihu-search search "向量数据库 选型" --scope web --count 10 --filter 'host!="example.com"'
 uvx zhihu-search ask "如何评估 RAG 系统的召回质量？" --model thinking
 uvx zhihu-search trending --limit 30
 ```
 
 - `search`: query 2–100 characters. `--scope zhihu` (default) searches Zhihu, `--count` ≤10;
   `--scope web` searches the web, `--count` ≤20. No pagination.
-- `--filter` and `--search-db all|realtime|static` apply to web scope only. Filter syntax:
-  `host == x` / `host != x`, `publish_time` comparisons in Unix seconds, uppercase `AND` /
-  `OR`. A filter cannot target `zhihu.com`.
+- `--filter` and `--search-db all|realtime|static` apply to web scope only. Official filter
+  syntax has no spaces around operators, quotes host values, and leaves timestamps bare:
+  `host=="example.com"`, `host!="example.com"`, `publish_time>=1778494631`, uppercase `AND` /
+  `OR`. `host=="zhihu.com"` and its subdomains are rejected by the platform.
 - `ask`: Zhihu Zhida answer. `--model fast|thinking|agent`. Output is AI-generated.
 - `trending`: Zhihu hot list, `--limit` ≤30.
 

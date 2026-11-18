@@ -49,12 +49,15 @@ EXCERPT_LIMIT = 400
 SHANGHAI = timezone(timedelta(hours=8))
 PUBLISH_FIELDS = ("PublishTime", "publish_time", "PublishedAt", "published_at")
 EDIT_FIELDS = ("EditTime", "edit_time")
+CREATE_FIELDS = ("CreateTime", "create_time", "CreatedAt", "created_at")
 GLOBAL_LEGEND = {"1": "low", "2": "medium", "3": "high", "4": "very_high"}
 _HOST_RE = re.compile(
     r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
 )
 _QUESTION_PATH = re.compile(r"^/question/([0-9]+)/?$")
 _ANSWER_PATH = re.compile(r"^/question/([0-9]+)/answer/[0-9]+/?$")
+_ANSWER_SHORT_PATH = re.compile(r"^/answer/[0-9]+/?$")
+_ARTICLE_PATH = re.compile(r"^/p/[0-9]+/?$")
 _POLICY_MARKERS = (
     "已阻止",
     "免费额度",
@@ -231,15 +234,21 @@ async def execute(plan: ResearchPlan, client: Any) -> dict[str, Any]:
             stopped = True
             stop_kind = outcome["stop_kind"]
             continue
-        _absorb(
-            outcome["data"],
-            job,
-            plan,
-            evidence,
-            duplicates,
-            seen,
-            limitations,
-        )
+        if outcome.get("items_shape") == "missing":
+            limitations.append(
+                f"{job['endpoint']} 对「{job['query']}」返回了成功响应，但没有 Items 列表。"
+                "这不是一份结构完整的空结果。"
+            )
+        else:
+            _absorb(
+                outcome.get("items") or [],
+                job,
+                plan,
+                evidence,
+                duplicates,
+                seen,
+                limitations,
+            )
     for job in held:
         calls.append(_not_sent(job, "超出本次 max_calls，未发送。"))
 
@@ -274,14 +283,17 @@ async def execute(plan: ResearchPlan, client: Any) -> dict[str, Any]:
         trace.get("status") == "ok" and trace.get("answers_page_complete") is not True
         for trace in traces
     )
+    malformed = any(call.get("items_shape") == "missing" for call in calls)
     if truncated:
         limitations.append(
             "上游标记还有更多结果，但没有可用的翻页参数，或回答摘要不是最后一页。"
             "本次没有继续请求。"
         )
+    if malformed:
+        limitations.append("缺少 Items 的成功响应没有被当成空结果。")
     if succeeded == 0:
         status = "blocked"
-    elif failed or not_sent or truncated:
+    elif failed or not_sent or truncated or malformed:
         status = "partial"
     else:
         status = "complete"
@@ -573,6 +585,7 @@ def _not_sent(job: dict[str, Any], reason: str) -> dict[str, Any]:
         "reason": reason,
         "has_more": None,
         "item_count": None,
+        "items_shape": "not_applicable",
     }
 
 
@@ -611,15 +624,23 @@ async def _dispatch(client: Any, job: dict[str, Any]) -> dict[str, Any]:
             "data": None,
         }
     data = result.data if isinstance(result, ApiResult) else getattr(result, "data", None)
-    items = _items(data)
+    shape, items = _read_items(data)
     has_more = data.get("HasMore") if isinstance(data, dict) else None
     if not isinstance(has_more, bool):
         has_more = None
     return {
-        "call": _call(job, "ok", has_more=has_more, item_count=len(items)),
+        "call": _call(
+            job,
+            "ok",
+            has_more=has_more,
+            item_count=len(items) if shape == "list" else None,
+            items_shape=shape,
+        ),
         "error": None,
         "stop_kind": None,
         "data": data,
+        "items": items,
+        "items_shape": shape,
     }
 
 
@@ -630,6 +651,7 @@ def _call(
     error: str | None = None,
     has_more: bool | None = None,
     item_count: int | None = None,
+    items_shape: str = "not_applicable",
 ) -> dict[str, Any]:
     return {
         "id": "",
@@ -644,6 +666,7 @@ def _call(
         "reason": None,
         "has_more": has_more,
         "item_count": item_count,
+        "items_shape": items_shape,
     }
 
 
@@ -663,7 +686,7 @@ def _policy(message: str) -> bool:
 
 
 def _absorb(
-    data: Any,
+    items: list[dict[str, Any]],
     job: dict[str, Any],
     plan: ResearchPlan,
     evidence: list[dict[str, Any]],
@@ -671,15 +694,15 @@ def _absorb(
     seen: dict[str, str],
     limitations: list[str],
 ) -> None:
-    for rank, item in enumerate(_items(data), 1):
+    for rank, item in enumerate(items, 1):
         if job["source"] == "knowledge":
             normalized = _knowledge_item(item, job, rank, plan)
         else:
             normalized = _search_item(item, job, rank, plan)
         _keep(normalized, evidence, duplicates, seen)
-    if not _items(data):
+    if not items:
         limitations.append(
-            f"{job['endpoint']} 对「{job['query']}」返回空列表。"
+            f"{job['endpoint']} 对「{job['query']}」返回了空的 Items 列表。"
         )
 
 
@@ -688,10 +711,32 @@ def _keep(
     evidence: list[dict[str, Any]],
     duplicates: list[dict[str, Any]],
     seen: dict[str, str],
-) -> None:
+) -> str:
+    """Return the evidence id that preserves this record.
+
+    The same canonical URL with a different text kind or a different excerpt
+    stays as its own record. Identical repeats point at the earlier id.
+    """
     key = item.pop("_dedupe")
     previous = seen.get(key)
     if previous:
+        kept = next(entry for entry in evidence if entry["id"] == previous)
+        if kept.get("excerpt") != item.get("excerpt") or kept.get("text_kind") != item.get("text_kind"):
+            item["id"] = f"e{len(evidence) + 1}"
+            item["same_locator_as"] = previous
+            evidence.append(item)
+            duplicates.append(
+                {
+                    "kept_id": previous,
+                    "also_kept_id": item["id"],
+                    "reason": "excerpt_differs",
+                    "source": item["source"],
+                    "query": item["query"],
+                    "search_rank": item["search_rank"],
+                    "url": item["url"],
+                }
+            )
+            return item["id"]
         duplicates.append(
             {
                 "kept_id": previous,
@@ -701,10 +746,11 @@ def _keep(
                 "url": item["url"],
             }
         )
-        return
+        return previous
     item["id"] = f"e{len(evidence) + 1}"
     seen[key] = item["id"]
     evidence.append(item)
+    return item["id"]
 
 
 def _search_item(
@@ -712,9 +758,13 @@ def _search_item(
     job: dict[str, Any],
     rank: int,
     plan: ResearchPlan,
+    *,
+    text_kind: str = "upstream_excerpt",
+    excerpt: str | None = None,
 ) -> dict[str, Any]:
     url = _clean_url(_first(item, "Url", "url"))
-    excerpt = _excerpt(_first(item, "ContentText", "Summary", "summary"))
+    if excerpt is None:
+        excerpt = _excerpt(_first(item, "ContentText", "Summary", "summary"))
     token = _text(_first(item, "ContentToken", "content_token"))
     return _record(
         source=job["source"],
@@ -726,14 +776,14 @@ def _search_item(
         author=_author(item),
         votes=_int_field(item, "VoteUpCount", "vote_up_count"),
         excerpt=excerpt,
-        text_kind="upstream_excerpt",
+        text_kind=text_kind,
         full_text=False,
         authority=_authority(item, job["source"]),
         ranking=_ranking(item, job["source"]),
         content_type=_text(_first(item, "ContentType", "content_type")),
         raw_item=item,
         plan=plan,
-        dedupe=_identity(job["source"], url, _text(_first(item, "Title", "title")) or "", excerpt, token),
+        dedupe=_identity(url, text_kind, _text(_first(item, "Title", "title")) or "", excerpt, token),
     )
 
 
@@ -768,7 +818,7 @@ def _knowledge_item(
         content_type=None,
         raw_item=item,
         plan=plan,
-        dedupe=_identity("knowledge", url, title, excerpt, token),
+        dedupe=_identity(url, "knowledge_snippet", title, excerpt, token),
     )
 
 
@@ -792,9 +842,8 @@ def _record(
     plan: ResearchPlan,
     dedupe: str,
 ) -> dict[str, Any]:
-    times = _times(raw_item)
-    primary = _primary_time(times)
-    bucket, in_window = _bucket(primary, source, plan)
+    times = _times(raw_item, source)
+    timing = _describe_time(times, source, plan)
     record = {
         "source": source,
         "endpoint": endpoint,
@@ -810,17 +859,15 @@ def _record(
         "full_text": full_text,
         "authority": authority,
         "ranking_score": ranking,
-        "time": {
-            "publish_or_update_unix": primary["unix"] if primary else None,
-            "publish_or_update_field": primary["field"] if primary else None,
-            "publish_or_update_role": primary["role"] if primary else None,
-            "event_unix": None,
-            "event_status": "not_provided",
-            "in_requested_window": in_window,
-            "bucket": bucket,
-        },
+        "time": timing,
         "upstream_times": [
-            {"field": item["field"], "unix": item["unix"], "status": item["status"]}
+            {
+                "field": item["field"],
+                "raw": item["raw"],
+                "unix": item["unix"],
+                "status": item["status"],
+                "role": item["role"],
+            }
             for item in times
         ],
         "_dedupe": dedupe,
@@ -862,49 +909,130 @@ def _ranking(item: dict[str, Any], source: str) -> dict[str, Any]:
     return {"status": "upstream", "value": value}
 
 
-def _times(item: dict[str, Any]) -> list[dict[str, Any]]:
+def _time_entry(field: str, raw: Any, role: str) -> dict[str, Any]:
+    unix = _unix(raw)
+    if isinstance(raw, str) or type(raw) is int:
+        preserved = raw
+    else:
+        preserved = None
+    return {
+        "field": field,
+        "raw": preserved,
+        "unix": unix,
+        "status": "usable" if unix is not None else "unusable",
+        "role": role,
+    }
+
+
+def _times(item: dict[str, Any], source: str) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
-    for key in PUBLISH_FIELDS + EDIT_FIELDS:
+    for key in PUBLISH_FIELDS:
+        if key in item:
+            found.append(_time_entry(key, item[key], "returned_publish_time"))
+    for key in EDIT_FIELDS:
         if key not in item:
             continue
-        unix = _unix(item[key])
-        role = "upstream_publish_time" if key in PUBLISH_FIELDS else "publish_or_update"
-        found.append(
-            {
-                "field": key,
-                "unix": unix,
-                "status": "usable" if unix is not None else "unusable",
-                "role": role,
-            }
-        )
+        if source == "zhihu":
+            role = "publish_or_update"
+        elif source == "web":
+            role = "last_edit"
+        else:
+            role = "upstream_edit_time"
+        found.append(_time_entry(key, item[key], role))
+    for key in CREATE_FIELDS:
+        if key in item:
+            found.append(_time_entry(key, item[key], "create_time"))
     return found
 
 
-def _primary_time(times: list[dict[str, Any]]) -> dict[str, Any] | None:
-    for role in ("upstream_publish_time", "publish_or_update"):
-        for item in times:
-            if item["role"] == role and item["status"] == "usable":
-                return item
-    return None
+def _usable(times: list[dict[str, Any]], role: str) -> dict[str, Any] | None:
+    return next((item for item in times if item["role"] == role and item["status"] == "usable"), None)
 
 
-def _bucket(
-    primary: dict[str, Any] | None,
+def _any_role(times: list[dict[str, Any]], role: str) -> dict[str, Any] | None:
+    return next((item for item in times if item["role"] == role), None)
+
+
+def _describe_time(
+    times: list[dict[str, Any]],
     source: str,
     plan: ResearchPlan,
-) -> tuple[str, bool | None]:
-    if plan.workflow != "recent":
-        return "not_applicable", None
-    start = plan.clock_unix - (plan.window_days or DEFAULT_WINDOW_DAYS) * 86400
-    end = plan.clock_unix
-    if primary is None:
-        if source == "web" and plan.web_filter:
-            return "filter_unverified", None
-        return "undated", None
-    inside = start <= primary["unix"] <= end
-    if inside:
-        return "verified_in_window", True
-    return "verified_outside_window", False
+) -> dict[str, Any]:
+    """Label upstream clocks without treating EditTime as a publish_time filter."""
+    publish = _usable(times, "returned_publish_time")
+    edited = _usable(times, "publish_or_update") or _usable(times, "last_edit") or _usable(times, "upstream_edit_time")
+    created = _any_role(times, "create_time")
+    filter_sent = source == "web" and "publish_time" in (plan.web_filter or "")
+
+    def inside(unix: int) -> bool | None:
+        if plan.workflow != "recent" or plan.window_days is None:
+            return None
+        start = plan.clock_unix - plan.window_days * 86400
+        return start <= unix <= plan.clock_unix
+
+    bucket = "not_applicable"
+    note = "本次不是按日期窗口整理。"
+    in_window = None
+    if plan.workflow == "recent":
+        if source == "web" and filter_sent and publish is None:
+            bucket = "publish_filter_not_verifiable"
+            note = (
+                "请求带了 publish_time 过滤，但返回条目没有可核对的 publish_time 字段。"
+                "全网 EditTime 是最后编辑时间，不能证明服务端按发布时间过滤。"
+            )
+        elif publish is not None:
+            in_window = inside(publish["unix"])
+            bucket = (
+                "returned_publish_time_in_window"
+                if in_window
+                else "returned_publish_time_outside_window"
+            )
+            note = "这是返回字段与窗口的本地比较，不是对服务端过滤的审计，也不是事件时间。"
+        elif edited is not None and edited["role"] == "publish_or_update":
+            in_window = inside(edited["unix"])
+            bucket = (
+                "local_publish_or_update_in_window"
+                if in_window
+                else "local_publish_or_update_outside_window"
+            )
+            note = "知乎 EditTime 是发布或更新时间。站内请求没有 publish_time 参数，窗口只在本地比较。"
+        elif edited is not None:
+            in_window = inside(edited["unix"])
+            bucket = (
+                "local_last_edit_in_window"
+                if in_window
+                else "local_last_edit_outside_window"
+            )
+            note = "这是编辑时间的本地比较，不能证明 publish_time 过滤，也不是事件时间。"
+        else:
+            bucket = "undated"
+            note = "没有可用的上游时间字段。"
+    publish_or_update = _usable(times, "publish_or_update")
+    return {
+        "publish_or_update_unix": publish_or_update["unix"] if publish_or_update else None,
+        "publish_or_update_field": publish_or_update["field"] if publish_or_update else None,
+        "publish_or_update_role": "publish_or_update" if publish_or_update else None,
+        "last_edit_unix": edited["unix"] if edited and edited["role"] == "last_edit" else None,
+        "last_edit_field": edited["field"] if edited and edited["role"] == "last_edit" else None,
+        "create_time": {
+            "status": created["status"] if created else "not_provided",
+            "field": created["field"] if created else None,
+            "raw": created["raw"] if created else None,
+            "unix": created["unix"] if created else None,
+        },
+        "returned_publish_time": {
+            "status": "usable" if publish else "not_provided",
+            "field": publish["field"] if publish else None,
+            "unix": publish["unix"] if publish else None,
+        },
+        "event_unix": None,
+        "event_status": "not_provided",
+        "in_requested_window": in_window if publish is not None else None,
+        "server_publish_filter_sent": filter_sent,
+        "server_publish_filter_verified_by_item": False,
+        "bucket": bucket,
+        "bucket_note": note,
+    }
 
 
 def _unix(value: Any) -> int | None:
@@ -914,39 +1042,53 @@ def _unix(value: Any) -> int | None:
 
 
 def _chronology(evidence: list[dict[str, Any]], workflow: str) -> dict[str, Any]:
-    groups = {
-        "publish_or_update_in_window": [],
-        "publish_or_update_outside_window": [],
+    groups: dict[str, list[str]] = {
+        "returned_publish_time_in_window": [],
+        "local_time_in_window": [],
+        "outside_window": [],
+        "publish_filter_not_verifiable": [],
         "undated": [],
-        "filter_unverified": [],
     }
     if workflow == "recent":
-        dated = []
+        returned = []
+        local = []
         for item in evidence:
             bucket = item["time"]["bucket"]
-            if bucket == "verified_in_window":
-                dated.append(item)
-            elif bucket == "verified_outside_window":
-                groups["publish_or_update_outside_window"].append(item["id"])
-            elif bucket == "filter_unverified":
-                groups["filter_unverified"].append(item["id"])
+            if bucket == "returned_publish_time_in_window":
+                returned.append(item)
+            elif bucket in {"local_publish_or_update_in_window", "local_last_edit_in_window"}:
+                local.append(item)
+            elif bucket in {
+                "returned_publish_time_outside_window",
+                "local_publish_or_update_outside_window",
+                "local_last_edit_outside_window",
+            }:
+                groups["outside_window"].append(item["id"])
+            elif bucket == "publish_filter_not_verifiable":
+                groups["publish_filter_not_verifiable"].append(item["id"])
             elif bucket == "undated":
                 groups["undated"].append(item["id"])
-        dated.sort(
-            key=lambda item: (
-                item["time"]["publish_or_update_unix"],
-                item["id"],
-            )
-        )
-        groups["publish_or_update_in_window"] = [item["id"] for item in dated]
+        returned.sort(key=lambda item: (item["time"]["returned_publish_time"]["unix"], item["id"]))
+        local.sort(key=_local_time_sort)
+        groups["returned_publish_time_in_window"] = [item["id"] for item in returned]
+        groups["local_time_in_window"] = [item["id"] for item in local]
     return {
         "confirmed_events": [],
         **groups,
         "note": (
-            "confirmed_events 在检索阶段始终为空。发布或更新时间落在窗口内"
-            "不等于事件发生时间；缺时间的条目保持不确定，搜索排名不参与排序。"
+            "confirmed_events 在检索阶段始终为空。返回的 publish_time 或 EditTime"
+            "落在窗口内不是事件时间。EditTime 不能证明服务端 publish_time 过滤。"
+            "搜索排名不参与排序。"
         ),
     }
+
+
+def _local_time_sort(item: dict[str, Any]) -> tuple[int, str]:
+    timing = item["time"]
+    unix = timing.get("publish_or_update_unix")
+    if unix is None:
+        unix = timing.get("last_edit_unix")
+    return (unix if isinstance(unix, int) else 0, item["id"])
 
 
 async def _follow_questions(
@@ -962,15 +1104,24 @@ async def _follow_questions(
 ) -> None:
     remaining = plan.max_calls - sum(call["status"] != "not_sent" for call in calls)
     questions: list[tuple[str, list[str]]] = []
+    unsupported: list[str] = []
     for item in evidence:
-        url = _question_url(item.get("url"))
-        if not url:
-            continue
-        matched = next((entry for entry in questions if entry[0] == url), None)
-        if matched:
-            matched[1].append(item["id"])
-        else:
-            questions.append((url, [item["id"]]))
+        kind, question = _follow_target(item.get("url"))
+        if kind == "question" and question:
+            matched = next((entry for entry in questions if entry[0] == question), None)
+            if matched:
+                matched[1].append(item["id"])
+            else:
+                questions.append((question, [item["id"]]))
+        elif kind == "unsupported" and item.get("url"):
+            unsupported.append(str(item["url"]))
+    if unsupported:
+        shown = "、".join(unsupported[:4])
+        limitations.append(
+            "这些链接不能用 question_answers 追溯："
+            f"{shown}。该接口只接受 https://www.zhihu.com/question/{{id}}。"
+            "单独的 /answer/{{id}} 和专栏链接没有已接入的反查接口，本次不编造。"
+        )
     if not questions:
         limitations.append("结果里没有可识别的知乎问题链接，未调用 question_answers。")
         return
@@ -1028,25 +1179,34 @@ async def _follow_questions(
             failed = True
             continue
         data = result.data if isinstance(result, ApiResult) else getattr(result, "data", None)
-        items = _items(data)
+        shape, items = _read_items(data)
         paging = data.get("Paging") if isinstance(data, dict) and isinstance(data.get("Paging"), dict) else {}
         is_end = paging.get("IsEnd")
         complete = is_end if isinstance(is_end, bool) else None
-        calls.append(_call(job, "ok", has_more=False if complete else None if complete is None else True, item_count=len(items)))
+        if shape == "missing":
+            complete = None
+            limitations.append(f"{url} 的回答响应没有 Items 列表，不能当成没有回答。")
+        calls.append(
+            _call(
+                job,
+                "ok",
+                has_more=False if complete else None if complete is None else True,
+                item_count=len(items) if shape == "list" else None,
+                items_shape=shape,
+            )
+        )
         answer_ids: list[str] = []
-        before = len(evidence)
         for rank, item in enumerate(items, 1):
             record = _search_item(
                 item,
                 {**job, "source": "question_answers"},
                 rank,
                 plan,
+                text_kind="upstream_summary",
+                excerpt=_excerpt(_first(item, "Summary", "summary", "ContentText")),
             )
-            record["text_kind"] = "upstream_summary"
             record["full_text"] = False
-            record["excerpt"] = _excerpt(_first(item, "Summary", "summary", "ContentText"))
-            _keep(record, evidence, duplicates, seen)
-        answer_ids.extend(entry["id"] for entry in evidence[before:])
+            answer_ids.append(_keep(record, evidence, duplicates, seen))
         traces.append(
             {
                 "question_url": url,
@@ -1063,22 +1223,29 @@ async def _follow_questions(
             )
 
 
-def _question_url(url: str | None) -> str | None:
+def _follow_target(url: str | None) -> tuple[str, str | None]:
+    """Classify a URL for question_answers. Unsupported forms stay explicit."""
     if not isinstance(url, str):
-        return None
+        return "ignore", None
     parts = urlsplit(url.strip())
-    if parts.scheme != "https" or parts.hostname != "www.zhihu.com":
-        return None
-    match = _QUESTION_PATH.fullmatch(parts.path) or _ANSWER_PATH.fullmatch(parts.path)
-    if not match:
-        return None
-    return f"https://www.zhihu.com/question/{match.group(1)}"
+    if parts.scheme != "https" or parts.username or parts.password:
+        return "ignore", None
+    if parts.hostname == "www.zhihu.com":
+        if _QUESTION_PATH.fullmatch(parts.path) or _ANSWER_PATH.fullmatch(parts.path):
+            match = _QUESTION_PATH.fullmatch(parts.path) or _ANSWER_PATH.fullmatch(parts.path)
+            assert match is not None
+            return "question", f"https://www.zhihu.com/question/{match.group(1)}"
+        if _ANSWER_SHORT_PATH.fullmatch(parts.path):
+            return "unsupported", None
+    if parts.hostname == "zhuanlan.zhihu.com" and _ARTICLE_PATH.fullmatch(parts.path):
+        return "unsupported", None
+    return "ignore", None
 
 
-def _items(data: Any) -> list[dict[str, Any]]:
+def _read_items(data: Any) -> tuple[str, list[dict[str, Any]]]:
     if isinstance(data, dict) and isinstance(data.get("Items"), list):
-        return [item for item in data["Items"] if isinstance(item, dict)]
-    return []
+        return "list", [item for item in data["Items"] if isinstance(item, dict)]
+    return "missing", []
 
 
 def _first(item: dict[str, Any], *keys: str) -> Any:
@@ -1134,18 +1301,18 @@ def _clean_url(value: Any) -> str | None:
 
 
 def _identity(
-    source: str,
     url: str | None,
+    text_kind: str,
     title: str,
     excerpt: str,
     token: str | None,
 ) -> str:
     if url:
-        return f"url:{_url_key(url)}"
+        return f"url:{_url_key(url)}|{text_kind}"
     if token:
-        return f"token:{source}:{token}"
+        return f"token:{text_kind}:{token}"
     body = _squash(excerpt) or _squash(title)
-    return f"text:{source}:{body}"
+    return f"text:{text_kind}:{body}"
 
 
 def _url_key(url: str) -> str:
@@ -1218,19 +1385,27 @@ def _format_item(item: dict[str, Any]) -> list[str]:
         )
     else:
         lines.append("- 权威等级：上游未提供")
-    if timing.get("publish_or_update_unix") is not None:
-        lines.append(
-            "- 发布或更新："
-            f"{timing.get('publish_or_update_field')}="
-            f"{timing.get('publish_or_update_unix')} "
-            f"({timing.get('publish_or_update_role')})；"
-            f"窗口判断={timing.get('in_requested_window')}；"
-            "事件时间=未提供"
-        )
+    created = timing.get("create_time") if isinstance(timing.get("create_time"), dict) else {}
+    if created.get("status") == "not_provided":
+        lines.append("- 创建时间：上游未提供")
     else:
         lines.append(
-            f"- 时间：{timing.get('bucket') or '不确定'}；事件时间=未提供"
+            f"- 创建时间原字段 {created.get('field')}={created.get('raw')}（不是事件时间）"
         )
+    if timing.get("publish_or_update_unix") is not None:
+        lines.append(
+            "- 知乎发布或更新："
+            f"{timing.get('publish_or_update_field')}="
+            f"{timing.get('publish_or_update_unix')}；"
+            "这不是全网 publish_time 过滤结果，也不是事件时间"
+        )
+    if timing.get("last_edit_unix") is not None:
+        lines.append(
+            f"- 最后编辑：{timing.get('last_edit_field')}={timing.get('last_edit_unix')}；"
+            "不能证明服务端 publish_time 过滤"
+        )
+    lines.append(f"- 时间归类：{timing.get('bucket') or '不确定'}。{timing.get('bucket_note') or ''}")
+    lines.append("- 事件时间：未提供")
     if item.get("excerpt"):
         lines.extend(["", item["excerpt"]])
     lines.append("")
