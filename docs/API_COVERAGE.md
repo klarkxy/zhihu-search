@@ -70,7 +70,7 @@ MCP 是 Skill 之后的高频集成选项。默认使用 `compact`，避免把�
 | `creator` | compact 加 `user_content_detail`、`user_content_comments`、`creator_account_stats`、`creator_content_stats` |
 | `office` | compact 加 `pdf_create`、`pdf_status`、`ppt_create`、`ppt_status` |
 | `sync` | compact 加 `sync_save`、`sync_list`、`sync_get`、`sync_prepare`、`sync_preview`、`sync_publish`、`sync_upload_image` |
-| `full` | 上表 22 个业务/账号工具，加 `other`，共 23 个。不含 `sync` |
+| `full` | 上表 22 个上游业务/账号工具，加 `research`、`research_render` 和 `other`，共 25 个。不含 `sync` |
 
 选择值是逗号分隔的档位名与工具名混写，结果取并集，例如 `knowledge,user`
 或 `compact,knowledge_search`。只写工具名时为严格 allowlist，例如
@@ -82,18 +82,57 @@ MCP 是 Skill 之后的高频集成选项。默认使用 `compact`，避免把�
   `question_answers`、`user_content_detail`、`user_content_comments`、
   `creator_account_stats`、`creator_content_stats`、`knowledge_bases`、
   `knowledge_items`、`knowledge_search`、`pdf_create`、`pdf_status`、
-  `ppt_create`、`ppt_status`。
-- `disable` 收起上述 19 个工具。
+  `ppt_create`、`ppt_status`、`research`、`research_render`。
+- `disable` 收起上述 21 个工具。
 - `reset` 恢复服务器启动时的工具集合。
 
-只要选择里出现档位名，`other` 就可管理全部 19 个低频工具；纯工具名的严格
+只要选择里出现档位名，`other` 就可管理全部 21 个低频工具；纯工具名的严格
 allowlist 下只能管理其中已允许的名称，无法展开列表外工具。
 
 启动参数为 `--tools`；也可用 `ZHIHU_MCP_TOOLS` 设置默认值，命令行优先。
-这里的数量容易混淆：MCP `full` 是 **23 个工具**（22 个业务/账号工具加
-`other`）；OpenAPI 是 **22 个业务/账号操作**，没有会话级 `other`。
+这里的数量容易混淆：MCP `full` 是 **25 个工具**（22 个上游业务/账号工具、
+本地的 `research` 与 `research_render`，再加 `other`）；OpenAPI 是 **24 个操作**，
+其中 `/research` 和 `/research/render` 不是新的知乎端点。
 搜索仍是一个工具覆盖知乎搜索和全网搜索两个端点。`sync` 是另一组 7 个工具，
 默认不加载，`other` 也不会展开。
+
+## 研究证据、宿主综合与本地报告
+
+深度研究、知乎观察和近况速览没有单独的官方 HTTP 端点。公开材料把它们描述成
+检索之后再写报告和本地交互页。本仓库用已有客户端完成检索，再由宿主写结构、
+由本地渲染器校验。官方 Skill、渲染脚本和样式没有再分发许可，这里不复制。
+
+公开依据：
+
+- [Zhihu CLI 文档](https://developer.zhihu.com/docs?key=zhihu_cli)
+- [全网搜索](https://developer.zhihu.com/api/v1/content/global_search)：`SearchDB` 为 `all`、`realtime` 或 `static`；`Filter` 支持 `host` 与 `publish_time`；最多 20 条；`HasMore` 没有请求用的 cursor；`AuthorityLevel` 字符串 `1` 低、`2` 中、`3` 高、`4` 很高只记载在全网搜索
+- [知乎搜索](https://developer.zhihu.com/api/v1/content/zhihu_search)：最多 10 条；会返回 `AuthorityLevel`，但该页没有 1-4 图例，本仓库不套用；`EditTime` 是发布或更新时间
+- 产品介绍文章：<https://zhuanlan.zhihu.com/p/2103916806142259391>
+
+| 步骤 | 谁做 | 入口 |
+|---|---|---|
+| 检索 | 工具，走现有额度预查、每日上限、失败即停 | `research deep\|observe\|recent`，或 MCP / OpenAPI `research` |
+| 综合 | 宿主。工具不调用直答，也不生成结论 | 按 `zhihu-search.report.v1` 写 JSON |
+| 校验和渲染 | 工具。不访问网络 | `research-render EVIDENCE.json SYNTHESIS.json --out DIR` |
+
+三种工作流：
+
+- `deep`：默认知乎加全网。知识库只在显式给出已有知识库或召回范围时检索。宿主写场景、条件结论、规格与体验、争议。交互数字必须出现在证据摘录里，或带假设编号；公式不能写死数字。
+- `observe`：默认只查知乎，并默认再取最多两个问题的一页回答摘要。摘要不是全文。观点并列，样本不能写成全体用户观点。作者和赞同数只有上游真的返回才保留。
+- `recent`：默认窗口是截至本次时钟的滚动 30 个 86400 秒。全网使用 `SearchDB=realtime` 和 `publish_time` 下界；知乎搜索没有日期参数。发布或更新时间和事件日期分开。缺日期或对不上摘录的日期进入不确定列表，不进入确认时间线。搜索排名不当成时间。
+
+证据包的 `report` 和 `html` 固定是 null。空证据、未完成检索上的 complete 报告、没有出处的数字、以及全体用户式表述都会使渲染失败，并且不会写出看起来已经完成的文件。
+
+单次 `max_calls` 默认 6、最大 12。它不改变 `ZHIHU_ALLOW_PAID` 或 `ZHIHU_DAILY_CALL_LIMIT`，模型参数里也没有这两项。渲染结果 `publishable` 为 false，不能拿去 `sync-publish`。
+
+离线验证：
+
+```bash
+uv run pytest tests/test_research.py tests/test_call_policy.py
+```
+
+这些测试使用 mock。研究检索的额度预检和每日上限断言在 `test_call_policy.py`，
+因为其他测试文件会短路调用保护。它们不读取本机 Access Secret，也不请求知乎。
 
 ## 知乎同步发布
 

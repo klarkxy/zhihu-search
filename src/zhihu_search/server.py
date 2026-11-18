@@ -20,15 +20,15 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastmcp import Context, FastMCP
 from fastmcp.tools import ToolResult
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from . import commands, credentials, formatters
-from .upstream.base import McpError
+from . import commands, credentials, formatters, research
+from .research_render import ReportRejected, render_report
 from .upstream.http_client import ZhihuRestClient
 
 
@@ -37,8 +37,11 @@ MCP_INSTRUCTIONS = (
     "answers), and trending (current Zhihu hot list). Low-frequency tools for authorized "
     "user data, questions, creator statistics, knowledge bases, and PDF/PPT tasks are "
     "listed after other(action='enable'). "
+    "research returns an evidence packet; research_render checks a host-written structure and "
+    "builds a local report. Both are listed after other(action='enable'). "
     "知乎开放平台工具：search 搜索知乎站内或全网，ask 调用知乎直答生成回答，trending 获取知乎热榜；"
     "用户数据、问题、创作统计、知识库与 PDF/PPT 等低频工具通过 other(action='enable') 展开。"
+    "research 返回证据包，research_render 校验宿主写出的结构并生成本地报告，二者也通过 other(action='enable') 展开。"
 )
 
 CORE_READ_ONLY_ANNOTATIONS = ToolAnnotations(
@@ -109,6 +112,7 @@ OFFICE_MCP_TOOL_NAMES = frozenset(
     }
 )
 ACCOUNT_MCP_TOOL_NAMES = frozenset({"quota"})
+RESEARCH_MCP_TOOL_NAMES = frozenset({"research", "research_render"})
 OPTIONAL_MCP_TOOL_NAMES = (
     USER_MCP_TOOL_NAMES
     | QUESTION_MCP_TOOL_NAMES
@@ -116,6 +120,7 @@ OPTIONAL_MCP_TOOL_NAMES = (
     | KNOWLEDGE_MCP_TOOL_NAMES
     | OFFICE_MCP_TOOL_NAMES
     | ACCOUNT_MCP_TOOL_NAMES
+    | RESEARCH_MCP_TOOL_NAMES
 )
 SYNC_MCP_TOOL_NAMES = frozenset(
     {
@@ -1009,12 +1014,119 @@ async def ppt_status(
 
 
 @mcp.tool(
+    name="research",
+    title="研究证据包",
+    description=(
+        "按 deep、observe 或 recent 检索并返回证据包。deep 默认查知乎和全网，"
+        "observe 默认查知乎，recent 默认查知乎，并对全网使用 realtime 与 publish_time 下界。"
+        "知识库只在给出 knowledge_base_ids 或 recall_scopes 时检索。"
+        "返回引用、时间字段、预算和失败；report 与 html 为 null。不调用直答，不发布。"
+        "max_calls 只限制这一次检索，不能改变付费开关或每日上限。"
+    ),
+    annotations=CORE_READ_ONLY_ANNOTATIONS,
+)
+async def research_tool(
+    question: Annotated[str, Field(min_length=2, max_length=500, description="研究问题。")],
+    workflow: Literal["deep", "observe", "recent"] = "deep",
+    angles: Annotated[
+        list[str] | None,
+        Field(description="2-100 字的检索角度，最多 4 个。长问题必须提供。"),
+    ] = None,
+    sources: Annotated[
+        list[Literal["zhihu", "web", "knowledge"]] | None,
+        Field(description="省略时使用该工作流的默认来源。"),
+    ] = None,
+    count: Annotated[int, Field(ge=1, le=10, description="每个查询的条数。")] = 5,
+    max_calls: Annotated[
+        int | None,
+        Field(ge=1, le=12, description="本次上游调用上限。不能提高每日上限。"),
+    ] = None,
+    window_days: Annotated[
+        int | None,
+        Field(ge=1, le=90, description="仅 recent 使用，默认 30。"),
+    ] = None,
+    hosts: Annotated[
+        list[str] | None,
+        Field(description="全网 host 过滤。不能写 zhihu.com。"),
+    ] = None,
+    follow_questions: Annotated[
+        bool | None,
+        Field(description="是否再取一页知乎问题回答摘要。省略时只有 observe 为 true。"),
+    ] = None,
+    knowledge_base_ids: Annotated[list[str] | None, Field(description="已有知识库 ID。")] = None,
+    recall_scopes: Annotated[
+        list[Literal["personal", "subscription", "public"]] | None,
+        Field(description="知识库召回范围。"),
+    ] = None,
+    as_of: Annotated[
+        int | None,
+        Field(description="recent 窗口截止的 Unix 秒。省略则用系统时钟。"),
+    ] = None,
+) -> ToolResult:
+    """Return an evidence packet for a later host-written report."""
+    try:
+        client = _get_client()
+    except credentials.CredentialsError as exc:
+        return _err(str(exc))
+    result = await commands.run_research(
+        workflow=workflow,
+        question=question,
+        angles=angles,
+        sources=sources,
+        count=count,
+        max_calls=max_calls,
+        window_days=window_days,
+        hosts=hosts,
+        follow_questions=follow_questions,
+        knowledge_base_ids=knowledge_base_ids,
+        recall_scopes=recall_scopes,
+        as_of=as_of,
+        client=client,
+    )
+    if not result.success:
+        return _err(result.error or "未知错误", result)
+    return _ok(research.format_evidence_packet(result.data), result)
+
+
+@mcp.tool(
+    name="research_render",
+    title="校验并渲染研究报告",
+    description=(
+        "校验宿主写出的 zhihu-search.report.v1，并返回 Markdown 与单文件 HTML。"
+        "数字必须能在证据摘录中找到，或带有明确假设。不确定日期不会进入确认时间线。"
+        "不访问网络，不发布，也不接受付费或每日上限参数。"
+    ),
+    annotations=ToolAnnotations(
+        readOnlyHint=True,
+        destructiveHint=False,
+        openWorldHint=False,
+    ),
+)
+async def research_render(
+    evidence: Annotated[dict[str, Any], Field(description="research 返回的证据包。")],
+    report: Annotated[dict[str, Any], Field(description="宿主撰写的报告结构。")],
+) -> ToolResult:
+    """Validate host synthesis and render it without searching again."""
+    try:
+        rendered = render_report(evidence, report)
+    except ReportRejected as exc:
+        return _err(str(exc))
+    text = (
+        "已生成本地报告文本。这不是知乎发布稿。\n\n"
+        + rendered["markdown"]
+        + "\n\n----- HTML -----\n\n"
+        + rendered["html"]
+    )
+    return _ok(text)
+
+
+@mcp.tool(
     name="other",
     title="其他",
     description=(
         "按当前 MCP 会话展开或收起低频工具。action='enable' 展开：授权用户"
         "自己的创作/关注/收藏数据、问题推荐与回答摘要、本人全文/评论/创作统计、"
-        "自建知识库内的私有文档检索、PDF 解析与 PPT 生成；"
+        "自建知识库内的私有文档检索、PDF 解析与 PPT 生成、研究证据包与本地报告渲染；"
         "'disable' 收起；'reset' 恢复服务器启动配置。"
     ),
 )

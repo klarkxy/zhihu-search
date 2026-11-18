@@ -38,7 +38,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import __version__, commands, credentials, formatters, openapi_credentials
+from . import __version__, commands, credentials, formatters, openapi_credentials, research
+from .research_render import ReportRejected, write_report
 from .upstream.http_client import OFFICIAL_QUOTA_IDS
 
 
@@ -113,7 +114,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(
         dest="command",
         metavar=(
-            "{install-skill,search,ask,trending,user-*,question-*,"
+            "{install-skill,search,ask,research,research-render,trending,user-*,question-*,"
             "creator-*,knowledge-*,quota,pdf-*,ppt-*,oauth-*,sync-*,serve,openwebui}"
         ),
     )
@@ -238,6 +239,46 @@ def _build_parser() -> argparse.ArgumentParser:
         "--format", choices=["markdown", "json"], default="markdown",
         help="输出格式。",
     )
+
+    rp = sub.add_parser(
+        "research",
+        help="按预算检索并返回证据包。不生成报告，也不发布。",
+    )
+    rp.add_argument("workflow", choices=["deep", "observe", "recent"])
+    rp.add_argument("question", help="研究问题，2-500 个字符。长问题请用 --angle 拆开。")
+    rp.add_argument("--angle", action="append", default=[], dest="angles", help="2-100 字的检索角度，可重复，最多 4 个。")
+    rp.add_argument(
+        "--source",
+        action="append",
+        default=[],
+        dest="sources",
+        choices=["zhihu", "web", "knowledge"],
+        help="检索来源，可重复。省略时按工作流使用默认来源。",
+    )
+    rp.add_argument("--count", type=int, default=5, help="每个查询的条数，1-10。")
+    rp.add_argument("--max-calls", type=int, default=None, help="本次最多发送的上游调用数，1-12。不能提高每日上限。")
+    rp.add_argument("--window-days", type=int, default=None, help="仅 recent 使用，默认 30，范围 1-90。")
+    rp.add_argument("--as-of", type=int, default=None, help="窗口截止的 Unix 秒。省略则用系统时钟。")
+    rp.add_argument("--host", action="append", default=[], dest="hosts", help="全网 host 过滤，可重复。不能写 zhihu.com。")
+    rp.add_argument("--follow-questions", action="store_true", help="对搜索到的知乎问题再取一页回答摘要。")
+    rp.add_argument("--no-follow-questions", action="store_true", help="不取回答摘要。observe 默认会取。")
+    rp.add_argument("--knowledge-base-id", action="append", default=[], dest="knowledge_base_ids")
+    rp.add_argument(
+        "--recall-scope",
+        action="append",
+        default=[],
+        dest="recall_scopes",
+        choices=["personal", "subscription", "public"],
+    )
+    rp.add_argument("--format", choices=["markdown", "json"], default="markdown")
+
+    rr = sub.add_parser(
+        "research-render",
+        help="校验宿主写的结构化结果，生成本地 Markdown、JSON 和单文件 HTML。",
+    )
+    rr.add_argument("evidence", help="research --format json 保存的证据包，或其中的 data 对象。")
+    rr.add_argument("synthesis", help="宿主撰写的 zhihu-search.report.v1 JSON。")
+    rr.add_argument("--out", required=True, help="输出目录。只写 report.md、report.json、report.html。")
 
     # --- ask ---
     ap = sub.add_parser("ask", help="向知乎直答提问。")
@@ -668,6 +709,8 @@ def _print_markdown(result: commands.CommandResult, kind: str, **fmt_kw: object)
     text = ""
     if kind == "search":
         text = formatters.format_search_items(result.data, **fmt_kw)
+    elif kind == "research":
+        text = research.format_evidence_packet(result.data)
     elif kind == "ask":
         text = formatters.format_zhida_answer(result.data)
     elif kind == "trending":
@@ -724,6 +767,62 @@ def _resolve_oauth_token(value: str) -> str | None:
 # ---------------------------------------------------------------------------
 # 子命令异步入口
 # ---------------------------------------------------------------------------
+
+
+def _follow_flag(args: argparse.Namespace) -> bool | None:
+    if args.follow_questions and args.no_follow_questions:
+        raise ValueError("不能同时使用 --follow-questions 和 --no-follow-questions。")
+    if args.follow_questions:
+        return True
+    if args.no_follow_questions:
+        return False
+    return None
+
+
+async def _run_research(args: argparse.Namespace) -> int:
+    result = await commands.run_research(
+        workflow=args.workflow,
+        question=args.question,
+        angles=args.angles or None,
+        sources=args.sources or None,
+        count=args.count,
+        max_calls=args.max_calls,
+        window_days=args.window_days,
+        hosts=args.hosts or None,
+        follow_questions=_follow_flag(args),
+        knowledge_base_ids=args.knowledge_base_ids or None,
+        recall_scopes=args.recall_scopes or None,
+        as_of=args.as_of,
+    )
+    if args.format == "json":
+        return _print_json(result, "research")
+    return _print_markdown(result, "research")
+
+
+def _load_json_object(path: str) -> dict:
+    file = Path(path)
+    if file.stat().st_size > 2_000_000:
+        raise ValueError("JSON 超过 2MB，拒绝读取。")
+    value = json.loads(file.read_text(encoding="utf-8"))
+    if isinstance(value, dict) and set(value) >= {"success", "kind", "data"} and isinstance(value.get("data"), dict):
+        return value["data"]
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} 必须是 JSON 对象。")
+    return value
+
+
+def _run_research_render(args: argparse.Namespace) -> int:
+    try:
+        evidence = _load_json_object(args.evidence)
+        synthesis = _load_json_object(args.synthesis)
+        rendered = write_report(evidence, synthesis, args.out)
+    except (OSError, json.JSONDecodeError, ValueError, ReportRejected) as exc:
+        print(f"[错误] {exc}", file=sys.stderr)
+        return 1
+    print(f"已写到 {rendered['directory']}")
+    print("report.md、report.json、report.html")
+    print("这是本地报告，没有发布到知乎。")
+    return 0
 
 
 async def _run_search(args: argparse.Namespace) -> int:
@@ -1320,6 +1419,10 @@ def main(argv: list[str] | None = None) -> int:
             return asyncio.run(_run_oauth_token(args))
         if args.command == "search":
             return asyncio.run(_run_search(args))
+        if args.command == "research":
+            return asyncio.run(_run_research(args))
+        if args.command == "research-render":
+            return _run_research_render(args)
         if args.command == "ask":
             return asyncio.run(_run_ask(args))
         if args.command == "trending":

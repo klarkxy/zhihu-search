@@ -20,5 +20,9 @@
   {"query": "只总结我下面贴出的这篇知乎回答，不要联网，也不要补充其他来源。", "should_trigger": false},
   {"query": "检查当前仓库的 package.json，为什么 pnpm build 报缺少 vite？", "should_trigger": false},
   {"query": "请只根据我上传的 Excel 计算这一列的平均值，不需要任何社区意见。", "should_trigger": false},
-  {"query": "纯数学证明：说明为什么任意大于一的整数都能分解为素数乘积。", "should_trigger": false}
+  {"query": "纯数学证明：说明为什么任意大于一的整数都能分解为素数乘积。", "should_trigger": false},
+  {"query": "做一份知乎观察：AI 短剧出海谁在赚钱，把不同说法并列，并链回原来的回答。", "should_trigger": true},
+  {"query": "近况速览减肥药过去 30 天的新进展，按事件时间整理，缺日期的不要当成已经发生。", "should_trigger": true},
+  {"query": "深度研究新房除甲醛空气净化器怎么选，要多来源证据和可核对的计算，不要编造成本。", "should_trigger": true},
+  {"query": "不要检索，直接写一份空气净化器五年成本交互页，数字你看着填，不用来源。", "should_trigger": false}
 ]

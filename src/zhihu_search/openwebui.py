@@ -20,7 +20,8 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from . import __version__, commands, credentials, formatters
+from . import __version__, commands, credentials, formatters, research
+from .research_render import ReportRejected, render_report
 from .upstream.http_client import ZhihuRestClient
 
 
@@ -88,6 +89,30 @@ class SearchRequest(ToolRequest):
         "all",
         description="全网搜索索引范围，仅 scope=web 生效。",
     )
+
+
+class ResearchRequest(ToolRequest):
+    """Bounded multi-source retrieval. It does not synthesize a report."""
+
+    question: str = Field(..., min_length=2, max_length=500)
+    workflow: Literal["deep", "observe", "recent"] = "deep"
+    angles: list[str] | None = None
+    sources: list[Literal["zhihu", "web", "knowledge"]] | None = None
+    count: int = Field(5, ge=1, le=10)
+    max_calls: int | None = Field(None, ge=1, le=12)
+    window_days: int | None = Field(None, ge=1, le=90)
+    hosts: list[str] | None = None
+    follow_questions: bool | None = None
+    knowledge_base_ids: list[str] | None = None
+    recall_scopes: list[Literal["personal", "subscription", "public"]] | None = None
+    as_of: int | None = None
+
+
+class ResearchRenderRequest(ToolRequest):
+    """Host synthesis plus the evidence packet. No network call."""
+
+    evidence: dict[str, Any]
+    report: dict[str, Any]
 
 
 class AskRequest(ToolRequest):
@@ -459,7 +484,8 @@ def create_app(api_key: str | None = None) -> FastAPI:
         version=__version__,
         description=(
             "知乎开放平台 OpenAPI 工具服务器，提供搜索、直答、热榜、"
-            "官方额度、本人公开数据、问题发现、创作能力、知识库以及 PDF/PPT 异步任务操作。"
+            "官方额度、本人公开数据、问题发现、创作能力、知识库、PDF/PPT 异步任务，"
+            "以及本地研究证据包和报告渲染。报告渲染不访问知乎。"
         ),
         lifespan=lifespan,
     )
@@ -492,6 +518,58 @@ def create_app(api_key: str | None = None) -> FastAPI:
         )
         content = formatters.format_search_items(result.data, request.scope) if result.success else ""
         return _response("search", result, content)
+
+    @tool_router.post(
+        "/research",
+        response_model=ToolResponse,
+        operation_id="research",
+        summary="检索研究证据包",
+    )
+    async def research_packet(request: ResearchRequest) -> ToolResponse:
+        try:
+            client = _get_client()
+        except credentials.CredentialsError as exc:
+            return _credentials_error("research", exc)
+        result = await commands.run_research(
+            workflow=request.workflow,
+            question=request.question,
+            angles=request.angles,
+            sources=request.sources,
+            count=request.count,
+            max_calls=request.max_calls,
+            window_days=request.window_days,
+            hosts=request.hosts,
+            follow_questions=request.follow_questions,
+            knowledge_base_ids=request.knowledge_base_ids,
+            recall_scopes=request.recall_scopes,
+            as_of=request.as_of,
+            client=client,
+        )
+        content = research.format_evidence_packet(result.data) if result.success else ""
+        return _response("research", result, content)
+
+    @tool_router.post(
+        "/research/render",
+        response_model=ToolResponse,
+        operation_id="research_render",
+        summary="校验并渲染本地研究报告",
+    )
+    async def research_render_route(request: ResearchRenderRequest) -> ToolResponse:
+        try:
+            rendered = render_report(request.evidence, request.report)
+        except ReportRejected as exc:
+            return ToolResponse(
+                success=False,
+                kind="research_render",
+                content=f"[错误] {exc}",
+                error=str(exc),
+            )
+        return ToolResponse(
+            success=True,
+            kind="research_render",
+            content=rendered["markdown"],
+            data={"markdown": rendered["markdown"], "html": rendered["html"], "report": rendered["data"]},
+        )
 
     @tool_router.post(
         "/ask",

@@ -169,6 +169,27 @@ uvx zhihu-search sync-upload-image ./photo.png --scene article
 - `sync-upload-image` reads a local image. MCP upload takes base64 instead of a path.
 - Video is rejected. Publisher secrets are never command output or tool arguments.
 
+## Research packet and local report
+
+```bash
+uvx zhihu-search research deep "新房除甲醛空气净化器怎么选" --angle "适用面积和 CADR" --angle "滤芯更换成本" --source zhihu --source web --max-calls 6 --format json
+uvx zhihu-search research observe "AI 短剧出海谁在赚钱" --follow-questions --format json
+uvx zhihu-search research recent "减肥药近期进展" --window-days 30 --host example.com --format json
+uvx zhihu-search research-render evidence.json synthesis.json --out ./research-out
+```
+
+- `research` returns `zhihu-search.evidence.v1`. `finished_research` is false, and `html` is null.
+- Default sources: deep = Zhihu + web, observe = Zhihu, recent = Zhihu + web.
+- Recent web calls use `SearchDB=realtime` and `publish_time>=<unix>`. Zhihu search has no date
+  parameter. `EditTime` is publication or update, not an event time. Ranking is not a date.
+- `--host` adds a web host filter and rejects `zhihu.com`. `--max-calls` defaults to 6 and
+  cannot exceed 12. It does not change the daily cap or the paid switch. There is no retry.
+- Knowledge search runs only when a knowledge-base id or recall scope is supplied.
+- `observe` follows at most two question URLs and reads one page of upstream summaries.
+- The host writes `zhihu-search.report.v1`. `research-render` validates it offline and writes
+  three local files. Interactive values must be found in an excerpt or tied to an assumption.
+  Formulas cannot contain numeric literals. Details: [research](research.md).
+
 ## Other commands
 
 - `serve --tools <profile|tool,…>`: starts the stdio MCP server with the given profile or

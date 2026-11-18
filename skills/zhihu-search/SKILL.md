@@ -1,7 +1,7 @@
 ---
 name: zhihu-search
 description: >-
-  Research Zhihu and Chinese-community viewpoints with source links: 知乎/知乎链接、真实体验、口碑、避坑、大家怎么看、国内用户观点、中文社区、国内热点、查中文来源. Use for requested Zhihu search, question answers, Zhida answers, hot lists, account quota, authorized user/creator data, knowledge bases, PDF/PPT tasks, zhihu-search setup, or an explicit request to adapt, preview, or publish existing content to Zhihu (article, question, pin, 知乎同步助手). Do not trigger merely because a question is in Chinese. Exclude repository-local code questions, pure math or logic, translation, and user-provided content unless external community evidence is requested; respect no-browsing and source restrictions. Account data, uploads, task creation, OAuth, and publishing require an explicit request.
+  Research Zhihu and Chinese-community viewpoints with source links: 知乎/知乎链接、真实体验、口碑、避坑、大家怎么看、国内用户观点、中文社区、国内热点、查中文来源、深度研究、知乎观察、近况速览. Use for requested Zhihu search, question answers, Zhida answers, hot lists, account quota, authorized user/creator data, knowledge bases, PDF/PPT tasks, zhihu-search setup, evidence packets and local research reports, or an explicit request to adapt, preview, or publish existing content to Zhihu (article, question, pin, 知乎同步助手). Do not trigger merely because a question is in Chinese. Exclude repository-local code questions, pure math or logic, translation, and user-provided content unless external community evidence is requested; respect no-browsing and source restrictions. Account data, uploads, task creation, OAuth, and publishing require an explicit request.
 ---
 
 # zhihu-search
@@ -25,7 +25,11 @@ describes what each tool does and how to call it. Full per-tool parameters are i
 | `creator` | `user_content_detail`, `user_content_comments`, `creator_account_stats`, `creator_content_stats` |
 | `office` | `pdf_create`, `pdf_status`, `ppt_create`, `ppt_status` |
 | `sync` | `sync_save`, `sync_list`, `sync_get`, `sync_prepare`, `sync_preview`, `sync_publish`, `sync_upload_image` |
-| `full` | all of the above except `sync`, plus `quota` |
+| `full` | all of the above except `sync`, plus `quota`, `research`, `research_render` |
+
+`research` and `research_render` are absent from `compact`. `other(action="enable")` or
+`--tools compact,research,research_render` reveals them. `research_render` does not take a
+local path; the CLI `research-render` writes files.
 
 In `compact`, `other(action="enable")` registers the remaining tools for the current
 session; hosts that cache the catalog need a refresh to see them. A selection made only
@@ -68,6 +72,27 @@ Publisher credentials are `ZHIHU_OPENAPI_APP_KEY` and `ZHIHU_OPENAPI_APP_SECRET`
 | `ppt-create`, `ppt-status` | Generate a PPT from a Zhihu answer/article URL | `--pages` 6–21 |
 | `oauth-url`, `oauth-token` | OAuth authorization URL / code exchange (CLI only) | needs `ZHIHU_OAUTH_APP_KEY` |
 | `sync-prepare`, `sync-preview`, `sync-publish` | Adapt, preview, then publish an article, question, or pin | publish only after explicit confirmation; see [sync](references/sync.md) |
+| `research` | Retrieve a bounded evidence packet for deep research, Zhihu observation, or a 30-day brief | not a report; see [research](references/research.md) |
+| `research-render` | Validate host synthesis and write local Markdown, JSON, and one HTML file | no network; does not publish |
+
+## Research packets and local reports
+
+`research` searches through the existing Zhihu, web, and optional knowledge-base clients.
+It records citations, upstream dates, authority values, budget, and failures. It does not
+call Zhida, does not write conclusions, and leaves `html` null. The host writes
+`zhihu-search.report.v1`: scenarios and conditional conclusions for `deep`, side-by-side
+viewpoints for `observe`, and separate event versus publication dates for `recent`.
+`research-render` then checks that structure and writes `report.md`, `report.json`, and
+`report.html`. Numbers must occur in a cited excerpt or be named assumptions. Undated
+items stay out of the confirmed timeline. A packet or an empty page is not a finished report.
+Do not pass the result to `sync-publish`. Contract: [research](references/research.md).
+
+```bash
+uvx zhihu-search research deep "新房除甲醛空气净化器怎么选" --angle "适用面积和 CADR" --angle "滤芯更换成本" --format json
+uvx zhihu-search research observe "AI 短剧出海谁在赚钱" --format json
+uvx zhihu-search research recent "减肥药近期进展" --window-days 30 --format json
+uvx zhihu-search research-render evidence.json synthesis.json --out ./research-out
+```
 
 ## Publishing to Zhihu
 
