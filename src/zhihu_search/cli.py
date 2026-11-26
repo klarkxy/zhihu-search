@@ -108,7 +108,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument("--allow-paid", action="store_true", help="显式允许已确认价格的 API 扣余额；仍受每日调用上限保护。")
-    p.add_argument("--daily-call-limit", type=int, help="本地北京时间每日业务请求上限，默认 100（1-100000）。")
+    p.add_argument("--daily-call-limit", type=int, help="本地北京时间每日业务请求上限，默认 1000（1-100000）。")
 
     # 子命令
     sub = p.add_subparsers(

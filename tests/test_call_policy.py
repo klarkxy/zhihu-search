@@ -1,11 +1,14 @@
 import asyncio
 import json
+import os
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
 import pytest
 from zhihu_search.call_policy import CallPolicy, CallBlocked, quota_group
-from zhihu_search.upstream.http_client import ZhihuRestClient, BASE_URL
+from zhihu_search.upstream.http_client import ZhihuRestClient, ZhihuResponseCache, BASE_URL
 from zhihu_search import commands, server, openwebui, cli
 
 
@@ -26,7 +29,8 @@ async def test_defaults_query_each_time_and_share_daily_cap_across_instances(tmp
     outcomes = await asyncio.gather(*(p.run("/api/v1/content/zhihu_search", None, quota, execute) for p in policies), return_exceptions=True)
     assert outcomes.count("ok") == 2
     assert sum(isinstance(v, CallBlocked) for v in outcomes) == 2
-    assert requests == ["quota", "business", "quota", "business"]
+    assert requests.count("quota") == 2
+    assert requests.count("business") == 2
     assert json.loads((tmp_path / "daily.json").read_text())["calls"] == 2
 
 
@@ -113,20 +117,31 @@ async def test_corrupt_ledger_and_stale_lock_fail_closed(tmp_path):
     with pytest.raises(CallBlocked, match="记录不可读"):
         await CallPolicy(directory=tmp_path).run("/api/v1/content/hot_list", None, quota, execute)
     (tmp_path / "request.lock").mkdir()
-    with pytest.raises(CallBlocked, match="保护锁忙或遗留"):
+    with pytest.raises(CallBlocked, match="保护锁忙"):
         await CallPolicy(directory=tmp_path, lock_timeout=0).run("/api/v1/content/hot_list", None, quota, execute)
 
 
 @pytest.mark.asyncio
-async def test_beijing_day_reset_keeps_uncertain_outcomes(tmp_path):
+async def test_beijing_day_reset_clears_uncertain_checked_free_and_calls(tmp_path):
     now = [1791907199.0]  # Immediately before Beijing midnight.
     policy = CallPolicy(directory=tmp_path, allow_paid=True, daily_call_limit=1, now=lambda: now[0])
     async def quota(group): pytest.fail("paid mode")
     async def execute(): return True
     await policy.run("/api/v1/content/hot_list", None, quota, execute)
+    ledger = json.loads((tmp_path / "daily.json").read_text())
+    ledger["uncertain"] = {"zhihu_search": 4}
+    ledger["free"] = {"zhihu_search": 30}
+    ledger["checked"] = {"zhihu_search": int(now[0])}
+    ledger["futureUnknown"] = {"kept": True}
+    (tmp_path / "daily.json").write_text(json.dumps(ledger))
     now[0] += 2
     await policy.run("/api/v1/content/hot_list", None, quota, execute)
-    assert json.loads((tmp_path / "daily.json").read_text())["calls"] == 1
+    data = json.loads((tmp_path / "daily.json").read_text())
+    assert data["calls"] == 1
+    assert "zhihu_search" not in data["uncertain"]
+    assert data["free"] == {}
+    assert data["checked"] == {}
+    assert data["futureUnknown"] == {"kept": True}
 
 
 @pytest.mark.parametrize("options", [{"daily_call_limit": 0}, {"daily_call_limit": True}, {"daily_call_limit": 100001}, {"allow_paid": "yes"}])
@@ -153,13 +168,13 @@ async def test_mcp_openapi_and_commands_use_the_same_protected_client(monkeypatc
         monkeypatch.setattr(openwebui, "_get_client", lambda: client)
         monkeypatch.setattr(commands, "_make_client", lambda _: (client, False))
         assert (await commands.run_search("普通资料")).success
-        assert not (await commands.run_search("普通资料")).success
+        assert not (await commands.run_search("另一份资料")).success
         # Invoke the real registered MCP callable and FastAPI route.
-        result = await server.search("普通资料")
+        result = await server.search("服务资料")
         assert result.is_error
         app = openwebui.create_app()
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://local") as api:
-            response = await api.post("/search", json={"query": "普通资料"})
+            response = await api.post("/search", json={"query": "开放资料"})
         assert not response.json()["success"]
         assert log == ["/api/v1/quota", "/api/v1/content/zhihu_search"]
         quota = await client.quota(["question_answers", "question_discovery"])
@@ -266,3 +281,174 @@ async def test_unchanged_official_remaining_cannot_be_reused_by_our_clients(tmp_
     results = await asyncio.gather(*(CallPolicy(directory=tmp_path, daily_call_limit=10).run("/api/v1/content/zhihu_search", None, quota, execute) for _ in range(5)), return_exceptions=True)
     assert results.count("ok") == 1
     assert json.loads((tmp_path / "daily.json").read_text())["free"]["zhihu_search"] == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_requests_overlap_in_execute(tmp_path):
+    first_inside = asyncio.Event()
+    second_inside = asyncio.Event()
+
+    async def quota(group): return remaining(group, 10)
+    async def execute_first():
+        first_inside.set()
+        await asyncio.wait_for(second_inside.wait(), 1)
+        return "first"
+    async def execute_second():
+        second_inside.set()
+        await asyncio.wait_for(first_inside.wait(), 1)
+        return "second"
+
+    policy = CallPolicy(directory=tmp_path)
+    results = await asyncio.wait_for(asyncio.gather(
+        policy.run("/api/v1/content/zhihu_search", None, quota, execute_first),
+        policy.run("/api/v1/content/zhihu_search", None, quota, execute_second),
+    ), 2)
+    assert sorted(results) == ["first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_quota_check_cache_refreshes_after_ttl_and_low_floor_checks_every_time(tmp_path):
+    now = [1767225600.0]
+    checks = 0
+    async def quota(group):
+        nonlocal checks
+        checks += 1
+        return remaining(group, 100)
+    async def execute(): return "ok"
+    policy = CallPolicy(directory=tmp_path, now=lambda: now[0])
+    await policy.run("/api/v1/content/zhihu_search", None, quota, execute)
+    await policy.run("/api/v1/content/zhihu_search", None, quota, execute)
+    assert checks == 1
+    now[0] += 301
+    await policy.run("/api/v1/content/zhihu_search", None, quota, execute)
+    assert checks == 2
+
+    low_dir = tmp_path / "low"
+    low_checks = 0
+    async def low_quota(group):
+        nonlocal low_checks
+        low_checks += 1
+        return remaining(group, 19)
+    low_policy = CallPolicy(directory=low_dir, now=lambda: now[0])
+    await low_policy.run("/api/v1/content/zhihu_search", None, low_quota, execute)
+    await low_policy.run("/api/v1/content/zhihu_search", None, low_quota, execute)
+    assert low_checks == 2
+
+
+@pytest.mark.asyncio
+async def test_stale_lock_is_reclaimed_and_fresh_lock_reports_automatic_recovery(tmp_path):
+    lock = tmp_path / "request.lock"
+    lock.mkdir()
+    old = time.time() - 120
+    os.utime(lock, (old, old))
+    async def quota(group): return remaining(group, 10)
+    async def execute(): return "ok"
+    assert await CallPolicy(directory=tmp_path).run("/api/v1/content/zhihu_search", None, quota, execute) == "ok"
+    assert not lock.exists()
+    assert not (tmp_path / "request.lock.owner.json").exists()
+
+    lock.mkdir()
+    with pytest.raises(CallBlocked, match="60 秒后自动恢复"):
+        await CallPolicy(directory=tmp_path, lock_timeout=0).run("/api/v1/content/zhihu_search", None, quota, execute)
+    lock.rmdir()
+
+
+def test_release_never_removes_lock_with_a_different_owner_token(tmp_path):
+    lock = tmp_path / "request.lock"
+    owner = tmp_path / "request.lock.owner.json"
+    lock.mkdir()
+    owner.write_text(json.dumps({"token": "actual", "pid": 123, "acquiredAt": int(time.time() * 1000)}))
+    policy = CallPolicy(directory=tmp_path)
+    policy._release("different")
+    assert lock.exists() and owner.exists()
+    policy._release("actual")
+    assert not lock.exists() and not owner.exists()
+
+
+@pytest.mark.asyncio
+async def test_cross_language_checked_ledger_uses_cache_and_settles_reservation(tmp_path):
+    today = datetime.fromtimestamp(time.time(), timezone(timedelta(hours=8))).date().isoformat()
+    now_s = int(time.time())
+    row = {"version": 1, "day": today, "calls": 3, "uncertain": {"zhihu_search": 1}, "free": {"zhihu_search": 50}, "checked": {"zhihu_search": now_s - 10}}
+    (tmp_path / "daily.json").write_text(json.dumps(row, separators=(",", ":")))
+
+    async def quota(group): pytest.fail("cached quota check must not run")
+    async def execute(): return "ok"
+    assert await CallPolicy(directory=tmp_path).run("/api/v1/content/zhihu_search", None, quota, execute) == "ok"
+    data = json.loads((tmp_path / "daily.json").read_text())
+    assert data["free"]["zhihu_search"] == 49
+    assert data["uncertain"]["zhihu_search"] == 1
+    assert data["calls"] == 4
+    assert data["checked"]["zhihu_search"] == now_s - 10
+
+
+@pytest.mark.asyncio
+async def test_phase2_lock_failure_does_not_fail_successful_call(tmp_path):
+    async def quota(group): return remaining(group, 10)
+    async def execute():
+        (tmp_path / "request.lock").mkdir()
+        return "ok"
+    result = await CallPolicy(directory=tmp_path, lock_timeout=0).run("/api/v1/content/zhihu_search", None, quota, execute)
+    assert result == "ok"
+    assert json.loads((tmp_path / "daily.json").read_text())["uncertain"]["zhihu_search"] == 1
+    (tmp_path / "request.lock").rmdir()
+
+
+def test_default_daily_cap_is_1000(monkeypatch):
+    monkeypatch.delenv("ZHIHU_DAILY_CALL_LIMIT", raising=False)
+    assert CallPolicy().daily_call_limit == 1000
+
+
+@pytest.mark.asyncio
+async def test_invalid_checked_record_fails_closed(tmp_path):
+    today = datetime.fromtimestamp(time.time(), timezone(timedelta(hours=8))).date().isoformat()
+    (tmp_path / "daily.json").write_text(json.dumps({"version": 1, "day": today, "calls": 0, "uncertain": {}, "free": {}, "checked": {"zhihu_search": -1}}))
+    async def quota(group): pytest.fail("quota must not run")
+    async def execute(): pytest.fail("business must not run")
+    with pytest.raises(CallBlocked, match="预查记录无效"):
+        await CallPolicy(directory=tmp_path).run("/api/v1/content/zhihu_search", None, quota, execute)
+
+
+def search_transport(log, fail_first=False):
+    attempts = {"count": 0}
+    async def handle(request):
+        log.append((request.url.path, dict(request.url.params)))
+        if request.url.path == "/api/v1/content/zhihu_search":
+            attempts["count"] += 1
+            if fail_first and attempts["count"] == 1:
+                return httpx.Response(500, json={"Code": 90001, "Message": "upstream", "Data": {}})
+        return httpx.Response(200, json={"Code": 0, "Data": {"Items": [{"Title": "条目"}], "HasMore": False}})
+    return httpx.MockTransport(handle)
+
+
+@pytest.mark.asyncio
+async def test_response_cache_reuses_gets_by_params_secret_and_ttl(tmp_path):
+    log = []
+    now = [1000.0]
+    cache = ZhihuResponseCache(now=lambda: now[0])
+    async with httpx.AsyncClient(base_url=BASE_URL, transport=search_transport(log)) as network:
+        policy = CallPolicy(directory=tmp_path, allow_paid=True)
+        first = ZhihuRestClient("secret-one", client=network, call_policy=policy, response_cache=cache)
+        second = ZhihuRestClient("secret-two", client=network, call_policy=policy, response_cache=cache)
+        initial = await first.zhihu_search("RAG")
+        initial.data["Items"].append({"Title": "调用方修改"})
+        cached = await first.zhihu_search("RAG")
+        assert [item["Title"] for item in cached.data["Items"]] == ["条目"]
+        await first.zhihu_search("RAG", count=6)
+        await second.zhihu_search("RAG")
+        now[0] += 601
+        await first.zhihu_search("RAG")
+    business = [entry for entry in log if entry[0] == "/api/v1/content/zhihu_search"]
+    assert len(business) == 4
+    assert json.loads((tmp_path / "daily.json").read_text())["calls"] == 4
+
+
+@pytest.mark.asyncio
+async def test_response_cache_never_caches_errors(tmp_path):
+    log = []
+    async with httpx.AsyncClient(base_url=BASE_URL, transport=search_transport(log, fail_first=True)) as network:
+        client = ZhihuRestClient("secret-one", client=network, call_policy=CallPolicy(directory=tmp_path, allow_paid=True))
+        with pytest.raises(Exception):
+            await client.zhihu_search("RAG")
+        assert (await client.zhihu_search("RAG")).data["Items"][0]["Title"] == "条目"
+    assert [entry for entry in log if entry[0] == "/api/v1/content/zhihu_search"].__len__() == 2
