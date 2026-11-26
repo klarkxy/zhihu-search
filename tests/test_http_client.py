@@ -1091,11 +1091,24 @@ async def test_question_answers_contract() -> None:
     assert result.data["Paging"]["NextOffset"] == 20
 
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["", "/"])
+async def test_question_answers_accepts_answer_links_and_sends_question_url(suffix: str) -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(f"{BASE_URL}/api/v1/content/question_answers").mock(
+            return_value=httpx.Response(200, json=_envelope(data={"Items": [], "Paging": {"IsEnd": True}}))
+        )
+        async with ZhihuRestClient(SECRET) as c:
+            await c.question_answers(f"https://www.zhihu.com/question/123/answer/456{suffix}")
+    assert route.calls.last.request.url.params["QuestionUrl"] == "https://www.zhihu.com/question/123"
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "question_url",
     [
-        "https://www.zhihu.com/question/123/answer/456",
+        "https://www.zhihu.com/answer/456",
         "http://www.zhihu.com/question/123",
         "https://example.com/question/123",
         "",

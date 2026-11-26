@@ -183,7 +183,8 @@ _ZHIHU_ANSWER_PATHS = (
     re.compile(r"^/question/[0-9]+/answer/[0-9]+/?$"),
 )
 _ZHIHU_ARTICLE_PATH = re.compile(r"^/p/[0-9]+/?$")
-_ZHIHU_QUESTION_PATH = re.compile(r"^/question/[0-9]+/?$")
+_ZHIHU_QUESTION_PATH = re.compile(r"^/question/([0-9]+)/?$")
+_ZHIHU_QUESTION_ANSWER_PATH = re.compile(r"^/question/([0-9]+)/answer/[0-9]+/?$")
 _CREATOR_WWW_PATHS = (
     re.compile(r"^/answer/[0-9]+/?$"),
     re.compile(r"^/question/[0-9]+/answer/[0-9]+/?$"),
@@ -1270,13 +1271,15 @@ class ZhihuRestClient:
     def _validate_question_url(cls, question_url: str) -> str:
         cleaned = question_url.strip() if isinstance(question_url, str) else question_url
         parsed = cls._parse_https_zhihu(cleaned, name="question_url")
-        if (
-            parsed.hostname == "www.zhihu.com"
-            and _ZHIHU_QUESTION_PATH.fullmatch(parsed.path)
-        ):
-            return cleaned
+        if parsed.hostname == "www.zhihu.com":
+            if _ZHIHU_QUESTION_PATH.fullmatch(parsed.path):
+                return cleaned
+            answer_match = _ZHIHU_QUESTION_ANSWER_PATH.fullmatch(parsed.path)
+            if answer_match:
+                return f"https://www.zhihu.com/question/{answer_match.group(1)}"
         raise InvalidArguments(
-            "question_url 必须是 https://www.zhihu.com/question/{id} 形式的问题链接"
+            "question_url 必须是 https://www.zhihu.com/question/{id} 问题链接，"
+            "或 https://www.zhihu.com/question/{qid}/answer/{aid} 回答链接"
         )
 
     @classmethod

@@ -166,7 +166,7 @@ class QuestionAnswersRequest(ToolRequest):
     question_url: str = Field(
         ...,
         min_length=1,
-        description="https://www.zhihu.com/question/{id}",
+        description="https://www.zhihu.com/question/{id}；也接受问题下的 /answer/{aid} 链接",
     )
     offset: int = Field(0, ge=0, description="非负 Int64 偏移，使用上一页 NextOffset。")
     limit: int = Field(20, ge=1, le=50, description="返回数量，最大 50。")

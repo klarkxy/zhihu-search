@@ -650,7 +650,7 @@ async def question_recommendations(
 async def question_answers(
     question_url: Annotated[
         str,
-        Field(min_length=1, description="https://www.zhihu.com/question/{id}"),
+        Field(min_length=1, description="https://www.zhihu.com/question/{id}；也接受问题下的 /answer/{aid} 链接"),
     ],
     offset: Annotated[
         int,
