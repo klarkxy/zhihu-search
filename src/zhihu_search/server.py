@@ -473,7 +473,7 @@ async def user_followees(
     limit: Annotated[int, Field(ge=1, le=50, description="返回数量。")] = 20,
     use_configured_oauth_user: Annotated[
         bool,
-        Field(description="true 使用服务端 ZHIHU_OAUTH_TOKEN."),
+        Field(description="true 使用服务端 ZHIHU_OAUTH_TOKEN。"),
     ] = False,
 ) -> ToolResult:
     try:
