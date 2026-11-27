@@ -36,8 +36,7 @@ uvx zhihu-search research recent "减肥药近期进展" --window-days 30 --form
 MCP tool: `research`. OpenAPI: `POST /research`. Both return the same packet.
 `max_calls` defaults to 6 and accepts 1–12. `count` accepts 1–10. Neither field
 can change `ZHIHU_ALLOW_PAID` or the Beijing-day cap. A failed upstream call stops
-the rest of the plan. Nothing is retried. Each sent call still goes through the
-fresh free-quota check.
+the rest of the plan. Nothing is retried. Each sent call still goes through free-quota protection; identical cached results do not spend quota.
 
 Questions may be up to 500 characters. Each search query must be 2–100 characters.
 If the question is longer, pass `--angle` values; the tool will not truncate it.

@@ -22,12 +22,16 @@
 
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 import re
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 from urllib.parse import quote, urlparse
 
 import httpx
@@ -203,6 +207,56 @@ class ApiResult:
     headers: dict[str, str]
 
 
+RESPONSE_CACHE_TTLS = {
+    "/api/v1/content/hot_list": 300.0,
+    "/api/v1/content/zhihu_search": 600.0,
+    "/api/v1/content/global_search": 600.0,
+    "/api/v1/content/question_answers": 600.0,
+}
+RESPONSE_CACHE_MAX_ENTRIES = 200
+
+
+def zhihu_response_cache_key(access_secret: str, path: str, params: dict[str, Any]) -> str:
+    items: list[list[str]] = []
+    for key in sorted(params, key=lambda value: str(value)):
+        value = params[key]
+        values = value if isinstance(value, (list, tuple)) else [value]
+        for item in values:
+            items.append([str(key), str(item)])
+    digest = hashlib.sha256(access_secret.encode("utf-8")).hexdigest()[:16]
+    canonical = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
+    return f"{digest}|{path}|{canonical}"
+
+
+class ZhihuResponseCache:
+    """Small in-process LRU for successful envelope GET results."""
+
+    def __init__(self, *, now: Callable[[], float] = time.time, max_entries: int = RESPONSE_CACHE_MAX_ENTRIES) -> None:
+        self._now = now
+        self._max_entries = max_entries
+        self._entries: OrderedDict[str, tuple[float, ApiResult]] = OrderedDict()
+
+    def get(self, key: str) -> ApiResult | None:
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        expires, value = entry
+        if self._now() >= expires:
+            self._entries.pop(key, None)
+            return None
+        self._entries.move_to_end(key)
+        return copy.deepcopy(value)
+
+    def set(self, key: str, value: ApiResult, ttl: float) -> None:
+        self._entries.pop(key, None)
+        self._entries[key] = (self._now() + ttl, copy.deepcopy(value))
+        while len(self._entries) > self._max_entries:
+            self._entries.popitem(last=False)
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+
 class ZhihuRestClient:
     """一个实例覆盖知乎开放平台数据接口并共享连接池。"""
 
@@ -213,6 +267,7 @@ class ZhihuRestClient:
         timeout: float = DEFAULT_TIMEOUT,
         client: Optional[httpx.AsyncClient] = None,
         call_policy: CallPolicy | None = None,
+        response_cache: ZhihuResponseCache | None = None,
     ) -> None:
         self._access_secret = access_secret
         self._timeout = timeout
@@ -221,6 +276,7 @@ class ZhihuRestClient:
         )
         self._owns_client = client is None
         self._call_policy = call_policy
+        self._response_cache = response_cache or ZhihuResponseCache()
 
     # ------------------------------------------------------------------
     # 公共：构造请求 / 解析响应
@@ -254,10 +310,13 @@ class ZhihuRestClient:
             return await execute()
 
         async def quota(api_id: str) -> Any:
-            result = await self._envelope_get("/api/v1/quota", {"APIIDs": api_id})
+            result = await self._envelope_get("/api/v1/quota", {"APIIDs": api_id}, timeout=10.0)
             return result.data
 
-        return await (self._call_policy or CallPolicy()).run(path, kwargs.get("json"), quota, execute)
+        credential = hashlib.sha256(self._access_secret.encode("utf-8")).hexdigest()[:16]
+        return await (self._call_policy or CallPolicy()).run(
+            path, kwargs.get("json"), quota, execute, credential=credential
+        )
 
     async def _envelope_get(
         self,
@@ -267,6 +326,13 @@ class ZhihuRestClient:
         timeout: float | None = None,
         oauth_token: str | None = None,
     ) -> ApiResult:
+        cache_ttl = RESPONSE_CACHE_TTLS.get(path)
+        cache_key = None
+        if cache_ttl is not None and oauth_token is None:
+            cache_key = zhihu_response_cache_key(self._access_secret, path, params)
+            cached = self._response_cache.get(cache_key)
+            if cached is not None:
+                return cached
         try:
             resp = await self._request("GET",
                 path,
@@ -278,7 +344,10 @@ class ZhihuRestClient:
             raise UpstreamTimeout(f"{path} 请求超时") from exc
         except httpx.HTTPError as exc:
             raise UpstreamUnavailable(f"{path} 网络错误：{exc}") from exc
-        return self._parse_envelope(resp, path)
+        result = self._parse_envelope(resp, path)
+        if cache_key is not None and cache_ttl is not None:
+            self._response_cache.set(cache_key, result, cache_ttl)
+        return result
 
     async def _envelope_post(
         self,
