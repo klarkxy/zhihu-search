@@ -29,6 +29,7 @@ QUOTA_CHECK_MIN_REMAINING = 20
 QUOTA_PRECHECK_TIMEOUT = 10
 LOCK_STALE_AFTER = 60
 LOCK_WAIT_TIMEOUT = 75
+OWNER_CLOCK_TOLERANCE = 0.05
 
 # Official quota mappings. Price confirmation is required only in paid mode.
 QUOTA_GROUPS = {
@@ -80,6 +81,14 @@ def _integer(value: Any) -> bool:
     return type(value) is int and 0 <= value <= 9007199254740991
 
 
+def _validate_credential(credential: Any) -> str | None:
+    if credential is None:
+        return None
+    if not isinstance(credential, str) or not credential.strip():
+        raise CallBlocked("凭证摘要无效；已阻止请求。")
+    return credential
+
+
 class CallPolicy:
     def __init__(self, *, allow_paid: bool | None = None, daily_call_limit: int | None = None,
                  directory: Path | None = None, lock_timeout: float = LOCK_WAIT_TIMEOUT,
@@ -120,7 +129,7 @@ class CallPolicy:
             data["checked"] = {}  # Existing version-1 ledgers predate quota-check caching.
         if not isinstance(data["checked"], dict) or any(not _integer(v) for v in data["checked"].values()):
             raise CallBlocked("本地额度预查记录无效；已阻止请求。")
-        if "credential" in data and data["credential"] is not None and (not isinstance(data["credential"], str) or not data["credential"]):
+        if "credential" in data and (not isinstance(data["credential"], str) or not data["credential"].strip()):
             raise CallBlocked("本地凭证摘要记录无效；已阻止请求。")
         if data["day"] != self._day():
             data.update(day=self._day(), calls=0, uncertain={}, free={}, checked={})
@@ -168,22 +177,23 @@ class CallPolicy:
             lock_stat = self._lock.stat()
         except FileNotFoundError:
             return None
+        now = self.now()
         basis = lock_stat.st_mtime
         try:
             owner_stat = self._owner.stat()
             owner = json.loads(self._owner.read_text(encoding="utf-8"))
             acquired = owner.get("acquiredAt") if isinstance(owner, dict) else None
             if type(acquired) in (int, float) and math.isfinite(acquired):
-                acquired_seconds = acquired / 1000
+                acquired_seconds = min(acquired / 1000, now + OWNER_CLOCK_TOLERANCE)
                 # An owner file older than this lock directory belongs to a
                 # previous incarnation and must not make a fresh lock look stale.
-                if owner_stat.st_mtime >= lock_stat.st_mtime - 0.002:
+                if owner_stat.st_mtime >= lock_stat.st_mtime - OWNER_CLOCK_TOLERANCE:
                     basis = acquired_seconds
         except (OSError, ValueError):
             pass
-        return self.now() - basis
+        return now - basis
 
-    def _acquire_reclaim(self, *, attempts: int = 2, retry_delay: float = 0.0) -> bool:
+    async def _acquire_reclaim(self, *, attempts: int = 2, retry_delay: float = 0.0) -> bool:
         reclaim = self._reclaim
         for attempt in range(attempts):
             try:
@@ -201,13 +211,13 @@ class CallPolicy:
                         pass
                     continue
                 if retry_delay > 0 and attempt + 1 < attempts:
-                    time.sleep(retry_delay)
+                    await asyncio.sleep(retry_delay)
                     continue
                 return False
         return False
 
-    def _reclaim_stale_lock(self) -> bool:
-        if not self._acquire_reclaim(attempts=2):
+    async def _reclaim_stale_lock(self) -> bool:
+        if not await self._acquire_reclaim(attempts=2):
             return False
         try:
             age = self._lock_age()
@@ -252,7 +262,7 @@ class CallPolicy:
                 self._lock.mkdir()
             except FileExistsError:
                 age = self._lock_age()
-                if age is not None and age > LOCK_STALE_AFTER and self._reclaim_stale_lock():
+                if age is not None and age > LOCK_STALE_AFTER and await self._reclaim_stale_lock():
                     continue
                 if time.monotonic() >= deadline:
                     raise CallBlocked("本地保护锁忙；已阻止请求。遗留锁会在 60 秒后自动恢复。")
@@ -268,9 +278,9 @@ class CallPolicy:
                     raise
                 return token
 
-    def _release(self, token: str) -> None:
+    async def _release(self, token: str) -> None:
         try:
-            if not self._acquire_reclaim(attempts=40, retry_delay=0.005):
+            if not await self._acquire_reclaim(attempts=40, retry_delay=0.005):
                 return
             try:
                 try:
@@ -290,28 +300,33 @@ class CallPolicy:
             pass
 
     async def _reserve(self, group: str, quota: Callable[[str], Awaitable[Any]], *,
-                       credential: str | None = None) -> None:
-        if credential is not None and not isinstance(credential, str):
-            raise CallBlocked("凭证摘要无效；已阻止请求。")
+                       credential: str | None = None) -> tuple[str, str | None]:
+        validated_credential = _validate_credential(credential)
         token = await self._acquire()
         try:
             data = self._read()
             if data["calls"] >= self.daily_call_limit:
                 raise CallBlocked("已达到本地北京时间每日业务调用上限；额度查询仍可使用。")
-            if credential:
+            if validated_credential is not None:
                 previous_credential = data.get("credential")
-                if previous_credential is not None and previous_credential != credential:
+                if previous_credential is not None and previous_credential != validated_credential:
                     data["free"] = {}
                     data["checked"] = {}
                     data["uncertain"] = {}
-                data["credential"] = credential
+                data["credential"] = validated_credential
             if not self.allow_paid:
-                now_seconds = int(self.now())
+                now_ts = int(self.now())
                 checked = data["checked"].get(group)
                 floor = data["free"].get(group)
-                cached = checked is not None and now_seconds - checked < QUOTA_CHECK_TTL and floor is not None and floor >= QUOTA_CHECK_MIN_REMAINING
+                uncertain = data["uncertain"].get(group, 0)
+                cached = (
+                    checked is not None
+                    and now_ts - checked < QUOTA_CHECK_TTL
+                    and floor is not None
+                    and floor - uncertain >= QUOTA_CHECK_MIN_REMAINING
+                )
                 if cached:
-                    available = floor
+                    available = floor - uncertain
                     next_free = floor - 1
                 else:
                     try:
@@ -323,10 +338,9 @@ class CallPolicy:
                         raise CallBlocked("官方未返回有效的免费剩余额度；未发送业务请求。")
                     remaining = matches[0]["RemainingQuota"]
                     prev_free = data["free"].get(group, remaining)
-                    uncertain = data["uncertain"].get(group, 0)
                     base_free = min(remaining, prev_free)
-                    data["checked"][group] = now_seconds
-                    available = base_free - uncertain
+                    data["checked"][group] = now_ts
+                    available = min(remaining - uncertain, base_free)
                     next_free = base_free - 1
                 if available <= 0:
                     raise CallBlocked("免费额度不足，或有结果未知的已发送请求；未发送业务请求。")
@@ -334,13 +348,15 @@ class CallPolicy:
             elif group in data["free"]:
                 data["free"][group] = max(0, data["free"][group] - 1)
             # Durable reservation before dispatch. Never refund uncertain outcomes.
+            reserved_day = data["day"]
             data["calls"] += 1
             data["uncertain"][group] = data["uncertain"].get(group, 0) + 1
             self._write(data)
+            return reserved_day, validated_credential
         finally:
-            self._release(token)
+            await self._release(token)
 
-    async def _settle(self, group: str) -> None:
+    async def _settle(self, group: str, *, reserved_day: str, credential: str | None = None) -> None:
         try:
             token = await self._acquire()
         except Exception:
@@ -348,24 +364,31 @@ class CallPolicy:
         try:
             try:
                 data = self._read()
+                if data["day"] != reserved_day:
+                    return
+                if credential is not None and data.get("credential") is not None and data.get("credential") != credential:
+                    return
                 data["uncertain"][group] = max(0, data["uncertain"].get(group, 0) - 1)
                 self._write(data)
             except Exception:
                 pass
         finally:
-            self._release(token)
+            await self._release(token)
 
     async def run(self, path: str, body: Any, quota: Callable[[str], Awaitable[Any]],
                   execute: Callable[[], Awaitable[T]], *, credential: str | None = None) -> T:
+        validated_credential = _validate_credential(credential)
         group = quota_group(path, body)
         if self.allow_paid and not priced_capability(path, body):
             raise CallBlocked("付费调用已阻止：该能力的官方计费未确认；请使用免费保护模式。")
         try:
-            await self._reserve(group, quota, credential=credential)
+            reserved_day, reserved_credential = await self._reserve(
+                group, quota, credential=validated_credential
+            )
         except OSError as exc:
             raise CallBlocked("本地保护存储不可用；已阻止业务请求。") from exc
         result = await execute()
         # Settlement is best-effort: the upstream call has already succeeded
         # and a local lock/IO problem must not turn that result into a failure.
-        await self._settle(group)
+        await self._settle(group, reserved_day=reserved_day, credential=reserved_credential)
         return result
