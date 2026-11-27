@@ -473,7 +473,7 @@ async def user_followees(
     limit: Annotated[int, Field(ge=1, le=50, description="返回数量。")] = 20,
     use_configured_oauth_user: Annotated[
         bool,
-        Field(description="true 使用服务端 ZHIHU_OAUTH_TOKEN。"),
+        Field(description="true 使用服务端 ZHIHU_OAUTH_TOKEN."),
     ] = False,
 ) -> ToolResult:
     try:
@@ -650,7 +650,13 @@ async def question_recommendations(
 async def question_answers(
     question_url: Annotated[
         str,
-        Field(min_length=1, description="https://www.zhihu.com/question/{id}；也接受问题下的 /answer/{aid} 链接"),
+        Field(
+            min_length=1,
+            description=(
+                "https://www.zhihu.com/question/{id} 问题链接；也接受问题下的 "
+                "/question/{qid}/answer/{aid} 回答链接（自动提取所属问题并返回该问题的回答列表，不单独定位该回答）。"
+            ),
+        ),
     ],
     offset: Annotated[
         int,

@@ -433,7 +433,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     qans.add_argument(
         "question_url",
-        help="https://www.zhihu.com/question/{id} 问题链接；也接受问题下的 /answer/{aid} 回答链接。",
+        help=(
+            "https://www.zhihu.com/question/{id} 问题链接；也接受问题下的 "
+            "/question/{qid}/answer/{aid} 回答链接（自动提取所属问题并返回该问题的回答列表，不单独定位该回答）。"
+        ),
     )
     qans.add_argument(
         "--offset",

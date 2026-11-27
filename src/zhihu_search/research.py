@@ -54,8 +54,8 @@ GLOBAL_LEGEND = {"1": "low", "2": "medium", "3": "high", "4": "very_high"}
 _HOST_RE = re.compile(
     r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
 )
-_QUESTION_PATH = re.compile(r"^/question/([0-9]+)/?$")
-_ANSWER_PATH = re.compile(r"^/question/([0-9]+)/answer/[0-9]+/?$")
+_QUESTION_PATH = re.compile(r"^/question/([1-9][0-9]{0,18})/?$")
+_ANSWER_PATH = re.compile(r"^/question/([1-9][0-9]{0,18})/answer/[1-9][0-9]{0,18}/?$")
 _ANSWER_SHORT_PATH = re.compile(r"^/answer/[0-9]+/?$")
 _ARTICLE_PATH = re.compile(r"^/p/[0-9]+/?$")
 _POLICY_MARKERS = (
@@ -1119,7 +1119,8 @@ async def _follow_questions(
         shown = "、".join(unsupported[:4])
         limitations.append(
             "这些链接不能用 question_answers 追溯："
-            f"{shown}。该接口只接受 https://www.zhihu.com/question/{{id}}。"
+            f"{shown}。该接口只接受 https://www.zhihu.com/question/{{id}} "
+            "及问题下的 https://www.zhihu.com/question/{{qid}}/answer/{{aid}} 链接。"
             "单独的 /answer/{{id}} 和专栏链接没有已接入的反查接口，本次不编造。"
         )
     if not questions:
