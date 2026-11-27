@@ -1,6 +1,9 @@
 import asyncio
+import hashlib
 import json
 import os
+import ssl
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -452,3 +455,174 @@ async def test_response_cache_never_caches_errors(tmp_path):
             await client.zhihu_search("RAG")
         assert (await client.zhihu_search("RAG")).data["Items"][0]["Title"] == "条目"
     assert [entry for entry in log if entry[0] == "/api/v1/content/zhihu_search"].__len__() == 2
+
+
+@pytest.mark.asyncio
+async def test_credential_isolation_resets_cache_and_floor_while_none_omits_key(tmp_path):
+    now = [1767225600.0]
+    quotas = {"secret-a": 100, "secret-b": 0, "secret-c": 50}
+    quota_calls = []
+
+    def make_transport(secret_label):
+        async def handle(request):
+            if request.url.path == "/api/v1/quota":
+                quota_calls.append(secret_label)
+                group = request.url.params.get("APIIDs", "zhihu_search")
+                return httpx.Response(200, json={"Code": 0, "Data": remaining(group, quotas[secret_label])})
+            return httpx.Response(200, json={"Code": 0, "Data": {"Items": [], "HasMore": False}})
+        return httpx.MockTransport(handle)
+
+    # 1. Default credential=None must not write "credential" into daily.json.
+    plain_dir = tmp_path / "plain"
+    async def plain_quota(group): return remaining(group, 10)
+    async def plain_exec(): return "ok"
+    assert await CallPolicy(directory=plain_dir, now=lambda: now[0]).run("/api/v1/content/zhihu_search", None, plain_quota, plain_exec) == "ok"
+    assert "credential" not in json.loads((plain_dir / "daily.json").read_text(encoding="utf-8"))
+
+    # 2. Switching from high-quota account A to exhausted account B within 5 min forces immediate quota check.
+    shared_dir = tmp_path / "shared"
+    policy = CallPolicy(directory=shared_dir, now=lambda: now[0])
+    async with httpx.AsyncClient(base_url=BASE_URL, transport=make_transport("secret-a")) as net_a:
+        client_a = ZhihuRestClient("secret-a", client=net_a, call_policy=policy)
+        await client_a.zhihu_search("第一次")
+        await client_a.zhihu_search("第二次")
+    assert quota_calls == ["secret-a"]
+    ledger_a = json.loads((shared_dir / "daily.json").read_text(encoding="utf-8"))
+    assert ledger_a["free"]["zhihu_search"] == 98
+    assert ledger_a["credential"] == hashlib.sha256(b"secret-a").hexdigest()[:16]
+
+    async with httpx.AsyncClient(base_url=BASE_URL, transport=make_transport("secret-b")) as net_b:
+        client_b = ZhihuRestClient("secret-b", client=net_b, call_policy=policy)
+        with pytest.raises(CallBlocked, match="免费额度不足"):
+            await client_b.zhihu_search("切到零额度账号")
+    assert quota_calls == ["secret-a", "secret-b"]
+
+    # 3. Switching from free=0 exhausted account A to funded account C unlocks immediately without waiting for midnight.
+    quotas["secret-a"] = 1
+    exhausted_dir = tmp_path / "exhausted"
+    policy_ex = CallPolicy(directory=exhausted_dir, now=lambda: now[0])
+    async with httpx.AsyncClient(base_url=BASE_URL, transport=make_transport("secret-a")) as net_a2:
+        client_a2 = ZhihuRestClient("secret-a", client=net_a2, call_policy=policy_ex)
+        await client_a2.zhihu_search("耗尽最后一格")
+        assert json.loads((exhausted_dir / "daily.json").read_text(encoding="utf-8"))["free"]["zhihu_search"] == 0
+        with pytest.raises(CallBlocked, match="免费额度不足"):
+            await client_a2.zhihu_search("同账号被拦")
+
+    async with httpx.AsyncClient(base_url=BASE_URL, transport=make_transport("secret-c")) as net_c:
+        client_c = ZhihuRestClient("secret-c", client=net_c, call_policy=policy_ex)
+        await client_c.zhihu_search("新账号立即恢复")
+    ledger_c = json.loads((exhausted_dir / "daily.json").read_text(encoding="utf-8"))
+    assert ledger_c["credential"] == hashlib.sha256(b"secret-c").hexdigest()[:16]
+    assert ledger_c["free"]["zhihu_search"] == 49
+    assert ledger_c["uncertain"].get("zhihu_search", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_inflight_quota_refresh_does_not_double_deduct_free_floor(tmp_path):
+    first_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    upstream_remaining = [10]
+
+    async def quota(group):
+        return remaining(group, upstream_remaining[0])
+
+    async def execute_first():
+        # Upstream has already deducted request A before request B refreshes quota.
+        upstream_remaining[0] = 9
+        first_entered.set()
+        await release_first.wait()
+        return "first"
+
+    async def execute_second():
+        upstream_remaining[0] = 8
+        return "second"
+
+    policy = CallPolicy(directory=tmp_path)
+    task_a = asyncio.create_task(policy.run("/api/v1/content/zhihu_search", None, quota, execute_first))
+    await first_entered.wait()
+    assert await policy.run("/api/v1/content/zhihu_search", None, quota, execute_second) == "second"
+    release_first.set()
+    assert await task_a == "first"
+
+    data = json.loads((tmp_path / "daily.json").read_text(encoding="utf-8"))
+    assert data["calls"] == 2
+    assert data["uncertain"]["zhihu_search"] == 0
+    assert data["free"]["zhihu_search"] == 8
+
+
+@pytest.mark.asyncio
+async def test_execute_oserror_propagates_while_reserve_oserror_maps_to_call_blocked(tmp_path):
+    async def quota(group):
+        return remaining(group, 5)
+
+    async def broken_network():
+        raise ssl.SSLError(1, "tlsv1 alert internal error")
+
+    policy = CallPolicy(directory=tmp_path)
+    with pytest.raises(ssl.SSLError):
+        await policy.run("/api/v1/content/zhihu_search", None, quota, broken_network)
+
+    bad_file_dir = tmp_path / "not_a_dir"
+    bad_file_dir.write_text("occupied", encoding="utf-8")
+    with pytest.raises(CallBlocked, match="本地保护存储不可用"):
+        await CallPolicy(directory=bad_file_dir).run("/api/v1/content/zhihu_search", None, quota, broken_network)
+
+
+@pytest.mark.asyncio
+async def test_stale_lock_with_owner_uses_injected_clock_and_release_respects_reclaim_mutex(tmp_path):
+    now = [1_700_000_000.0]
+    policy = CallPolicy(directory=tmp_path, lock_timeout=0, now=lambda: now[0])
+    token = await policy._acquire()
+    assert (tmp_path / "request.lock").exists()
+    assert (tmp_path / "request.lock.owner.json").exists()
+
+    now[0] += 30
+    async def quota(group): return remaining(group, 10)
+    async def execute(): return "ok"
+    with pytest.raises(CallBlocked, match="60 秒后自动恢复"):
+        await CallPolicy(directory=tmp_path, lock_timeout=0, now=lambda: now[0]).run(
+            "/api/v1/content/zhihu_search", None, quota, execute
+        )
+
+    # Advance injected clock past 60s without touching filesystem mtime via os.utime.
+    now[0] += 31
+    assert await CallPolicy(directory=tmp_path, lock_timeout=0, now=lambda: now[0]).run(
+        "/api/v1/content/zhihu_search", None, quota, execute
+    ) == "ok"
+
+    # Simulate old owner waking up in _release while reclaim mutex is held during successor takeover.
+    successor_token = await policy._acquire()
+    reclaim_dir = tmp_path / "request.lock.reclaim"
+    reclaim_dir.mkdir()
+
+    def replace_under_reclaim():
+        time.sleep(0.03)
+        (tmp_path / "request.lock.owner.json").write_text(
+            json.dumps({"token": "new-successor", "pid": 999, "acquiredAt": int(now[0] * 1000)}),
+            encoding="utf-8",
+        )
+        reclaim_dir.rmdir()
+
+    worker = threading.Thread(target=replace_under_reclaim)
+    worker.start()
+    policy._release(successor_token)
+    worker.join()
+    assert (tmp_path / "request.lock").exists()
+    assert json.loads((tmp_path / "request.lock.owner.json").read_text(encoding="utf-8"))["token"] == "new-successor"
+    policy._release("new-successor")
+    assert not (tmp_path / "request.lock").exists()
+
+
+def test_response_cache_enforces_200_entry_lru_eviction():
+    from zhihu_search.upstream.http_client import ApiResult
+
+    now = [1000.0]
+    cache = ZhihuResponseCache(now=lambda: now[0])
+    for idx in range(200):
+        cache.set(f"key-{idx}", ApiResult(data={"idx": idx}, headers={}), 600.0)
+    # Touch key-0 so key-1 becomes the least-recently-used entry.
+    assert cache.get("key-0").data["idx"] == 0
+    cache.set("key-200", ApiResult(data={"idx": 200}, headers={}), 600.0)
+    assert cache.get("key-1") is None
+    assert cache.get("key-0").data["idx"] == 0
+    assert cache.get("key-200").data["idx"] == 200

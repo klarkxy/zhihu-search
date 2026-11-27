@@ -314,7 +314,10 @@ class ZhihuRestClient:
             result = await self._envelope_get("/api/v1/quota", {"APIIDs": api_id}, timeout=10.0)
             return result.data
 
-        return await (self._call_policy or CallPolicy()).run(path, kwargs.get("json"), quota, execute)
+        credential = hashlib.sha256(self._access_secret.encode("utf-8")).hexdigest()[:16]
+        return await (self._call_policy or CallPolicy()).run(
+            path, kwargs.get("json"), quota, execute, credential=credential
+        )
 
     async def _envelope_get(
         self,
