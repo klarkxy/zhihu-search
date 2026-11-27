@@ -33,6 +33,6 @@ def _isolate_legacy_request_contracts(monkeypatch, request):
     if request.path.name.startswith("test_call_policy"):
         return
     from zhihu_search.call_policy import CallPolicy
-    async def passthrough(self, path, body, quota, execute):
+    async def passthrough(self, path, body, quota, execute, *, credential=None):
         return await execute()
     monkeypatch.setattr(CallPolicy, "run", passthrough)
