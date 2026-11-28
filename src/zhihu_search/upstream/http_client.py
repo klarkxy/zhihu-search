@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -183,7 +183,10 @@ _ZHIHU_ANSWER_PATHS = (
     re.compile(r"^/question/[0-9]+/answer/[0-9]+/?$"),
 )
 _ZHIHU_ARTICLE_PATH = re.compile(r"^/p/[0-9]+/?$")
-_ZHIHU_QUESTION_PATH = re.compile(r"^/question/[0-9]+/?$")
+_ZHIHU_QUESTION_PATH = re.compile(r"^/question/([1-9][0-9]{0,18})/?$")
+_ZHIHU_QUESTION_ANSWER_PATH = re.compile(
+    r"^/question/([1-9][0-9]{0,18})/answer/[1-9][0-9]{0,18}/?$"
+)
 _CREATOR_WWW_PATHS = (
     re.compile(r"^/answer/[0-9]+/?$"),
     re.compile(r"^/question/[0-9]+/answer/[0-9]+/?$"),
@@ -1172,12 +1175,22 @@ class ZhihuRestClient:
     def _parse_https_zhihu(cls, value: str, *, name: str):
         cls._validate_nonempty_string(value, name=name)
         try:
-            parsed = urlparse(value)
+            parsed = urlsplit(value)
             hostname = parsed.hostname
+            port = parsed.port
         except ValueError as exc:
             raise InvalidArguments(f"{name} 不是有效 URL") from exc
         if parsed.scheme != "https" or hostname is None:
             raise InvalidArguments(f"{name} 必须是 HTTPS 知乎链接")
+        if (
+            parsed.username is not None
+            or parsed.password is not None
+            or port is not None
+            or "@" in parsed.netloc
+            or ":" in parsed.netloc
+            or ";" in parsed.path
+        ):
+            raise InvalidArguments(f"{name} 不能包含账号信息、端口或路径参数")
         return parsed
 
     @staticmethod
@@ -1273,13 +1286,15 @@ class ZhihuRestClient:
     def _validate_question_url(cls, question_url: str) -> str:
         cleaned = question_url.strip() if isinstance(question_url, str) else question_url
         parsed = cls._parse_https_zhihu(cleaned, name="question_url")
-        if (
-            parsed.hostname == "www.zhihu.com"
-            and _ZHIHU_QUESTION_PATH.fullmatch(parsed.path)
-        ):
-            return cleaned
+        if parsed.hostname == "www.zhihu.com":
+            match = _ZHIHU_QUESTION_PATH.fullmatch(
+                parsed.path
+            ) or _ZHIHU_QUESTION_ANSWER_PATH.fullmatch(parsed.path)
+            if match:
+                return f"https://www.zhihu.com/question/{match.group(1)}"
         raise InvalidArguments(
-            "question_url 必须是 https://www.zhihu.com/question/{id} 形式的问题链接"
+            "question_url 必须是 https://www.zhihu.com/question/{id} 问题链接，"
+            "或 https://www.zhihu.com/question/{qid}/answer/{aid} 回答链接"
         )
 
     @classmethod

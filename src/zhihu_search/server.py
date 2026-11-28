@@ -650,7 +650,13 @@ async def question_recommendations(
 async def question_answers(
     question_url: Annotated[
         str,
-        Field(min_length=1, description="https://www.zhihu.com/question/{id}"),
+        Field(
+            min_length=1,
+            description=(
+                "https://www.zhihu.com/question/{id} 问题链接；也接受问题下的 "
+                "/question/{qid}/answer/{aid} 回答链接（自动提取所属问题并返回该问题的回答列表，不单独定位该回答）。"
+            ),
+        ),
     ],
     offset: Annotated[
         int,

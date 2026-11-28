@@ -54,8 +54,8 @@ GLOBAL_LEGEND = {"1": "low", "2": "medium", "3": "high", "4": "very_high"}
 _HOST_RE = re.compile(
     r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
 )
-_QUESTION_PATH = re.compile(r"^/question/([0-9]+)/?$")
-_ANSWER_PATH = re.compile(r"^/question/([0-9]+)/answer/[0-9]+/?$")
+_QUESTION_PATH = re.compile(r"^/question/([1-9][0-9]{0,18})/?$")
+_ANSWER_PATH = re.compile(r"^/question/([1-9][0-9]{0,18})/answer/[1-9][0-9]{0,18}/?$")
 _ANSWER_SHORT_PATH = re.compile(r"^/answer/[0-9]+/?$")
 _ARTICLE_PATH = re.compile(r"^/p/[0-9]+/?$")
 _POLICY_MARKERS = (
@@ -1119,8 +1119,9 @@ async def _follow_questions(
         shown = "、".join(unsupported[:4])
         limitations.append(
             "这些链接不能用 question_answers 追溯："
-            f"{shown}。该接口只接受 https://www.zhihu.com/question/{{id}}。"
-            "单独的 /answer/{{id}} 和专栏链接没有已接入的反查接口，本次不编造。"
+            f"{shown}。该接口只接受 https://www.zhihu.com/question/{{id}} "
+            "及问题下的 https://www.zhihu.com/question/{qid}/answer/{aid} 链接。"
+            "单独的 /answer/{id} 和专栏链接没有已接入的反查接口，本次不编造。"
         )
     if not questions:
         limitations.append("结果里没有可识别的知乎问题链接，未调用 question_answers。")
@@ -1227,17 +1228,29 @@ def _follow_target(url: str | None) -> tuple[str, str | None]:
     """Classify a URL for question_answers. Unsupported forms stay explicit."""
     if not isinstance(url, str):
         return "ignore", None
-    parts = urlsplit(url.strip())
-    if parts.scheme != "https" or parts.username or parts.password:
+    try:
+        parts = urlsplit(url.strip())
+        hostname = parts.hostname
+        port = parts.port
+    except ValueError:
         return "ignore", None
-    if parts.hostname == "www.zhihu.com":
-        if _QUESTION_PATH.fullmatch(parts.path) or _ANSWER_PATH.fullmatch(parts.path):
-            match = _QUESTION_PATH.fullmatch(parts.path) or _ANSWER_PATH.fullmatch(parts.path)
-            assert match is not None
+    if (
+        parts.scheme != "https"
+        or parts.username is not None
+        or parts.password is not None
+        or port is not None
+        or "@" in parts.netloc
+        or ":" in parts.netloc
+        or ";" in parts.path
+    ):
+        return "ignore", None
+    if hostname == "www.zhihu.com":
+        match = _QUESTION_PATH.fullmatch(parts.path) or _ANSWER_PATH.fullmatch(parts.path)
+        if match:
             return "question", f"https://www.zhihu.com/question/{match.group(1)}"
         if _ANSWER_SHORT_PATH.fullmatch(parts.path):
             return "unsupported", None
-    if parts.hostname == "zhuanlan.zhihu.com" and _ARTICLE_PATH.fullmatch(parts.path):
+    if hostname == "zhuanlan.zhihu.com" and _ARTICLE_PATH.fullmatch(parts.path):
         return "unsupported", None
     return "ignore", None
 

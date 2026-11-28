@@ -64,9 +64,12 @@ window, not after the packet clock, and the excerpt must use it as an event.
 `2026-11-01` are rejected. A publication or update date, or an assumption, cannot
 enter the confirmed timeline. Uncertain items stay outside it.
 
-`/answer/{id}` and `zhuanlan.zhihu.com/p/{id}` are not followed. `question_answers`
-only accepts `https://www.zhihu.com/question/{id}`. A later answer summary is kept
-even when its canonical URL matches an earlier search hit with a different excerpt.
+Standalone `/answer/{id}` and `zhuanlan.zhihu.com/p/{id}` are not followed.
+`question_answers` accepts `https://www.zhihu.com/question/{id}` and
+`https://www.zhihu.com/question/{qid}/answer/{aid}` (normalizing the latter to the
+parent question URL to return that question's answer summaries, rather than fetching
+a single answer). A later answer summary is kept even when its canonical URL matches
+an earlier search hit with a different excerpt.
 
 `AuthorityLevel` is copied as returned. The labels low / medium / high / very high
 are applied only when the source is web and the value is the string `1`, `2`, `3`,

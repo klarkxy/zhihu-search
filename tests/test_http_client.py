@@ -1085,19 +1085,68 @@ async def test_question_answers_contract() -> None:
             )
 
     params = route.calls.last.request.url.params
-    assert params["QuestionUrl"] == "https://www.zhihu.com/question/123/"
+    assert params["QuestionUrl"] == "https://www.zhihu.com/question/123"
     assert params["Offset"] == "20"
     assert params["Limit"] == "20"
     assert result.data["Paging"]["NextOffset"] == 20
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", ["", "/"])
+async def test_question_answers_accepts_answer_links_and_sends_question_url(suffix: str) -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(f"{BASE_URL}/api/v1/content/question_answers").mock(
+            return_value=httpx.Response(200, json=_envelope(data={"Items": [], "Paging": {"IsEnd": True}}))
+        )
+        async with ZhihuRestClient(SECRET) as c:
+            await c.question_answers(f"https://www.zhihu.com/question/123/answer/456{suffix}")
+    assert route.calls.last.request.url.params["QuestionUrl"] == "https://www.zhihu.com/question/123"
+
+
+@pytest.mark.asyncio
+async def test_question_answers_normalizes_variants_and_shares_response_cache() -> None:
+    with respx.mock(assert_all_called=True) as router:
+        route = router.get(f"{BASE_URL}/api/v1/content/question_answers").mock(
+            return_value=httpx.Response(
+                200,
+                json=_envelope(data={"Items": [{"ContentToken": "456"}], "Paging": {"IsEnd": True}}),
+            )
+        )
+        async with ZhihuRestClient(SECRET) as c:
+            for variant in (
+                "https://www.zhihu.com/question/123",
+                "https://www.zhihu.com/question/123/",
+                "https://WWW.ZHIHU.COM/question/123/?utm_psn=123#anchor",
+                "https://www.zhihu.com/question/123/answer/456",
+                "https://www.zhihu.com/question/123/answer/456/",
+            ):
+                res = await c.question_answers(variant)
+                assert res.data["Items"][0]["ContentToken"] == "456"
+
+    assert len(route.calls) == 1
+    assert route.calls.last.request.url.params["QuestionUrl"] == "https://www.zhihu.com/question/123"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "question_url",
     [
-        "https://www.zhihu.com/question/123/answer/456",
+        "https://www.zhihu.com/answer/456",
         "http://www.zhihu.com/question/123",
         "https://example.com/question/123",
+        "https://user:pass@www.zhihu.com/question/123",
+        "https://user@www.zhihu.com/question/123/answer/456",
+        "https://@www.zhihu.com/question/123",
+        "https://www.zhihu.com:8443/question/123",
+        "https://www.zhihu.com:443/question/123",
+        "https://www.zhihu.com:/question/123",
+        "https://www.zhihu.com/question/123;params=1",
+        "https://www.zhihu.com/question/123/answer/456;params=1",
+        "https://www.zhihu.com/question/0",
+        "https://www.zhihu.com/question/0123",
+        "https://www.zhihu.com/question/123/answer/0",
+        "https://www.zhihu.com/question/0/answer/456",
+        "https://www.zhihu.com/question/" + "1" * 20,
         "",
     ],
 )
